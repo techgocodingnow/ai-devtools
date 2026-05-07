@@ -100,3 +100,4 @@ CHANGELOG.local.md
 # Notarization receipts / artifacts produced by manual signing
 notarization-*.zip
 *.notarization-log.json
+CertificateSigningRequest.certSigningRequest
