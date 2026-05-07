@@ -22,6 +22,11 @@ struct AgentCapabilityManagerApp: App {
                 Button("About Agent Capability Manager") {
                     NSApp.orderFrontStandardAboutPanel(nil)
                 }
+                Button("Check for Updates…") {
+                    env.checkForUpdates(force: true)
+                    env.showUpdateSheet = true
+                }
+                .keyboardShortcut("u", modifiers: [.command])
             }
         }
     }

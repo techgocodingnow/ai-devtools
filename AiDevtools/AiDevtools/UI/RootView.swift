@@ -4,17 +4,26 @@ struct RootView: View {
     @EnvironmentObject private var env: AppEnvironment
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(selection: $env.sidebar)
-                .frame(minWidth: 220)
-        } content: {
-            ContentColumn()
-                .frame(minWidth: 320)
-        } detail: {
-            DetailColumn()
-                .frame(minWidth: 460)
+        VStack(spacing: 0) {
+            UpdateBannerView()
+            NavigationSplitView {
+                SidebarView(selection: $env.sidebar)
+                    .frame(minWidth: 220)
+            } content: {
+                ContentColumn()
+                    .frame(minWidth: 320)
+            } detail: {
+                DetailColumn()
+                    .frame(minWidth: 460)
+            }
+            .navigationTitle("Agent Capability Manager")
         }
-        .navigationTitle("Agent Capability Manager")
+        .animation(.easeInOut(duration: 0.2), value: env.updateBannerDismissed)
+        .animation(.easeInOut(duration: 0.2), value: env.updateState.value?.isNewer)
+        .sheet(isPresented: $env.showUpdateSheet) {
+            AboutUpdatesView()
+                .environmentObject(env)
+        }
     }
 }
 

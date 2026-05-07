@@ -1,0 +1,102 @@
+# ──────────────── macOS ────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# ──────────────── Xcode user / build state ────────────────
+# Per-user Xcode UI state — not shareable
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode shared schemes are committed; per-user are not
+**/xcshareddata/WorkspaceSettings.xcsettings
+
+# ──────────────── Build outputs ────────────────
+build/
+DerivedData/
+*.xcarchive
+*.app
+*.zip
+*.dmg
+*.pkg
+.build/
+.swiftpm/
+Packages/
+Package.pins
+Package.resolved
+*.swiftdoc
+*.swiftmodule
+*.swiftsourceinfo
+
+# ──────────────── Secrets / credentials ────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.cer
+*.cert
+*.mobileprovision
+*.provisionprofile
+*_secret*
+*_secrets*
+secrets.*
+AuthKey_*.p8
+notary-*.json
+
+# ──────────────── Tooling caches ────────────────
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+.bundle/
+vendor/bundle/
+
+# Tuist / SwiftFormat / SwiftLint caches
+.tuist-bin/
+*.tuist-cache
+.swiftlint-cache
+.swiftformat-cache
+
+# ──────────────── Editor / IDE ────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+.cursor/
+
+# ──────────────── Node / docs tooling (if any lands here) ────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# ──────────────── Local agent / runtime artifacts ────────────────
+*.log
+logs/
+tmp/
+.tmp/
+.cache/
+
+# ──────────────── Project-local ────────────────
+# Local override workspace settings
+*.local.xcconfig
+local.xcconfig
+
+# Generated changelogs from CI runs (release workflow writes here)
+CHANGELOG.local.md
+
+# Notarization receipts / artifacts produced by manual signing
+notarization-*.zip
+*.notarization-log.json

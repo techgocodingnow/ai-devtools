@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -56,6 +57,7 @@ public final class AppEnvironment: ObservableObject {
     public let installer: PluginInstaller
     public let keychain: KeychainService
     public let claudeDesktop: ClaudeDesktopConfigService
+    public let updateService: UpdateService
 
     @Published public var sidebar: SidebarSection = .projects {
         didSet {
@@ -65,6 +67,9 @@ public final class AppEnvironment: ObservableObject {
         }
     }
     @Published public var contentSelection: ContentSelection?
+    @Published public var updateState: LoadState<UpdateInfo> = .idle
+    @Published public var updateBannerDismissed: Bool = false
+    @Published public var showUpdateSheet: Bool = false
 
     public init(
         registry: RegistryStore? = nil,
@@ -74,7 +79,8 @@ public final class AppEnvironment: ObservableObject {
         marketplace: MarketplaceService? = nil,
         installer: PluginInstaller = PluginInstaller(),
         keychain: KeychainService = KeychainService(),
-        claudeDesktop: ClaudeDesktopConfigService? = nil
+        claudeDesktop: ClaudeDesktopConfigService? = nil,
+        updateService: UpdateService = UpdateService()
     ) {
         self.registry = registry ?? RegistryStore()
         self.projects = projects ?? ProjectsStore()
@@ -84,6 +90,7 @@ public final class AppEnvironment: ObservableObject {
         self.installer = installer
         self.keychain = keychain
         self.claudeDesktop = claudeDesktop ?? ClaudeDesktopConfigService()
+        self.updateService = updateService
     }
 
     public func bootstrap() {
@@ -93,6 +100,7 @@ public final class AppEnvironment: ObservableObject {
         importClaudeDesktopMCP()
         ensureDefaultAgent()
         saveSoon()
+        checkForUpdates()
     }
 
     /// Pull skills/plugins/MCP servers already installed in `~/.claude/` into the registry.
@@ -166,5 +174,34 @@ public final class AppEnvironment: ObservableObject {
 
     public var defaultAgent: Agent {
         registry.agents.values.first ?? Agent(name: "Claude Code", type: .code)
+    }
+
+    public func checkForUpdates(force: Bool = false) {
+        Task { [weak self] in
+            await self?.performUpdateCheck(force: force)
+        }
+    }
+
+    private func performUpdateCheck(force: Bool) async {
+        if !force {
+            let allowed = await updateService.shouldCheck()
+            guard allowed else { return }
+        }
+        updateState = .loading
+        do {
+            let info = try await updateService.fetchLatest()
+            updateState = .loaded(info)
+        } catch {
+            let message = (error as? UpdateCheckError)?.description ?? error.localizedDescription
+            updateState = .failed(message)
+        }
+    }
+
+    public func openReleasesPage() {
+        if case .loaded(let info) = updateState {
+            NSWorkspace.shared.open(info.releaseURL)
+        } else {
+            NSWorkspace.shared.open(UpdateService.releasesPageURL)
+        }
     }
 }

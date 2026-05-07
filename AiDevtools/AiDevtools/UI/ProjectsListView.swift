@@ -46,7 +46,9 @@ struct ProjectsListView: View {
     private func bindingSelection() -> Binding<ContentSelection?> {
         Binding(
             get: { env.contentSelection },
-            set: { env.contentSelection = $0 }
+            set: { newValue in
+                DispatchQueue.main.async { env.contentSelection = newValue }
+            }
         )
     }
 
