@@ -98,6 +98,8 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Developer ID Application" \
             DEVELOPMENT_TEAM=L23PD654Q3 \
+            ENABLE_HARDENED_RUNTIME=YES \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime" \
             archive
           test -d "$ARCHIVE_PATH"
 
@@ -110,6 +112,22 @@ jobs:
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$EXPORT_OPTIONS"
           ls -la "$EXPORT_PATH"
+
+      - name: Verify signing
+        run: |
+          set -euo pipefail
+          APP_PATH="${EXPORT_PATH}/${APP_NAME}.app"
+          echo "--- codesign -dv ---"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/codesign-dv.txt
+          echo "--- hardened runtime / timestamp checks ---"
+          grep -E "flags=.*runtime" /tmp/codesign-dv.txt || { echo "ERROR: hardened runtime not enabled"; exit 1; }
+          grep -E "Timestamp=" /tmp/codesign-dv.txt || { echo "ERROR: secure timestamp missing"; exit 1; }
+          echo "--- entitlements ---"
+          codesign -d --entitlements :- "$APP_PATH" || true
+          echo "--- deep verify ---"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          echo "--- gatekeeper assess (informational, may fail pre-notarize) ---"
+          spctl -a -t exec -vv "$APP_PATH" || true
 
       - name: Create DMG
         run: |
@@ -130,19 +148,47 @@ jobs:
           ls -la build/dmg
 
       - name: Notarize DMG
+        id: notarize
         env:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: |
           set -euo pipefail
-          xcrun notarytool submit "build/dmg/${DMG_NAME}" \
+          SUBMIT_OUTPUT=$(xcrun notarytool submit "build/dmg/${DMG_NAME}" \
             --apple-id "$NOTARY_APPLE_ID" \
             --team-id "$NOTARY_TEAM_ID" \
             --password "$NOTARY_PASSWORD" \
-            --wait
+            --output-format json \
+            --wait)
+          echo "$SUBMIT_OUTPUT"
+          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | jq -r '.id')
+          STATUS=$(echo "$SUBMIT_OUTPUT" | jq -r '.status')
+          echo "submission_id=$SUBMISSION_ID" >> "$GITHUB_OUTPUT"
+          if [[ "$STATUS" != "Accepted" ]]; then
+            echo "Notarization status: $STATUS"
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$NOTARY_APPLE_ID" \
+              --team-id "$NOTARY_TEAM_ID" \
+              --password "$NOTARY_PASSWORD"
+            exit 1
+          fi
           xcrun stapler staple "build/dmg/${DMG_NAME}"
           xcrun stapler validate "build/dmg/${DMG_NAME}"
+
+      - name: Fetch notary log on failure
+        if: failure() && steps.notarize.outputs.submission_id != ''
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          SUBMISSION_ID: ${{ steps.notarize.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool log "$SUBMISSION_ID" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --password "$NOTARY_PASSWORD"
 
       - name: Generate changelog
         env:
