@@ -139,6 +139,8 @@ final class AppStore: ObservableObject {
     private var disabledHooks: [String: HookRecord] = [:]
     /// Marketplace ids the user turned off (app-persisted; extraKnownMarketplaces has no enabled flag).
     private var disabledSources: Set<String> = []
+    /// `enabledPlugins` map from settings.json ("name@marketplace": Bool) — for uninstall commands.
+    private var enabledPlugins: [String: Bool] = [:]
     /// Number of agent candidates the detector probes (for the scan card).
     @Published var agentCandidateCount: Int = 0
 
@@ -160,6 +162,7 @@ final class AppStore: ObservableObject {
         try? persistence.loadProjects(into: projectsStore)
         loadDisabledHooks()
         loadDisabledSources()
+        enabledPlugins = settings.loadEnabledPlugins()
 
         importer.runImport()
         for server in desktopConfig.loadServers() {
@@ -215,9 +218,52 @@ final class AppStore: ObservableObject {
         let plugin = parts.count == 2 ? parts[1] : item.name
         let market = parts.count == 2 ? parts[0] : item.market
         let cmd = "/plugin install \(plugin)@\(market)"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(cmd, forType: .string)
+        copyToClipboard(cmd)
         showToast("Copied “\(cmd)” — run it in Claude Code")
+    }
+
+    /// Remove is symmetric with Install: hand the user the real uninstall command rather
+    /// than deleting from disk. For non-plugin items, surface where the entry actually lives.
+    func copyRemoveCommand(_ id: String) {
+        guard let ref = itemRefs[id] else { return }
+        if let plugin = owningPlugin(for: ref) {
+            let qualified = pluginQualifiedName(plugin)
+            let cmd = "/plugin uninstall \(qualified)"
+            copyToClipboard(cmd)
+            showToast("Copied “\(cmd)” — run it in Claude Code")
+            return
+        }
+        switch ref.kind {
+        case .skill:
+            if let s = registry.skills[ref.id] {
+                copyToClipboard(s.location.path)
+                showToast("Standalone skill — folder path copied: \(Self.abbreviate(s.location.path))")
+            }
+        case .mcpServer:
+            if let m = registry.mcpServers[ref.id] {
+                showToast("Edit \(m.origin.displayLabel) config to remove “\(m.label)”.")
+            }
+        default:
+            showToast("No uninstall command for this item.")
+        }
+    }
+
+    private func owningPlugin(for ref: CapabilityRef) -> Plugin? {
+        switch ref.kind {
+        case .plugin: return registry.plugins[ref.id]
+        case .skill: return registry.skills[ref.id]?.pluginID.flatMap { registry.plugins[$0] }
+        case .mcpServer: return registry.plugins.values.first { $0.mcpServerIDs.contains(ref.id) }
+        default: return nil
+        }
+    }
+
+    private func pluginQualifiedName(_ plugin: Plugin) -> String {
+        enabledPlugins.keys.first { $0.hasPrefix(plugin.name + "@") } ?? plugin.name
+    }
+
+    private func copyToClipboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
     }
 
     private func showToast(_ message: String) {

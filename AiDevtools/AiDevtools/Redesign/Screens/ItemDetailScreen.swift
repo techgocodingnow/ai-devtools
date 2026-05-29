@@ -40,7 +40,7 @@ struct ItemDetailScreen: View {
             Spacer()
             Btn(.ghost, sm: true) {} label: { Sym(Icons.refresh, size: 12); Text("Check for updates") }
             Btn(.normal, sm: true) {} label: { Sym(Icons.edit, size: 12); Text("Edit") }
-            Btn(.danger, sm: true) {} label: { Sym(Icons.trash, size: 12); Text("Remove…") }
+            Btn(.danger, sm: true, action: { store.copyRemoveCommand(item.id) }) { Sym(Icons.trash, size: 12); Text("Remove…") }
         }
     }
 

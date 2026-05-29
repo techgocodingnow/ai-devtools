@@ -28,8 +28,25 @@ struct AppShell: View {
                     .frame(maxWidth: 520)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+
+            if let toast = store.toast {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Sym(Icons.copy, size: 12).foregroundStyle(t.accent)
+                        Text(toast).font(.system(size: 11.5)).foregroundStyle(t.fg)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(t.bgElev))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(t.line, lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                    .padding(.bottom, 40)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .animation(.easeInOut(duration: 0.15), value: store.showOnboarding)
+        .animation(.easeInOut(duration: 0.2), value: store.toast)
         .environment(\.colorScheme, theme.colorScheme)
     }
 

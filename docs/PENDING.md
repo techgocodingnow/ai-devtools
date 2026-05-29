@@ -71,8 +71,14 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
    `/plugin install agent-sdk-dev@claude-plugins-official`.
    - Alternative left dormant: `PluginInstaller` (downloads repo zip → app Packages dir →
      registry as origin:manual) — app-only visibility, sandbox-unzip risk. Not wired.
-7. **Remove** item ⬜ — deletes from disk (destructive).
-8. **Edit** item/config ⬜ — open file in external editor.
+7. **Remove** ✅ (copy-command) — symmetric with Install; no destructive disk ops.
+   Plugin-bundled items copy `/plugin uninstall <plugin>@<marketplace>` (qualified name
+   resolved from `enabledPlugins`); standalone skills copy their folder path; MCP entries
+   point at their config file. Global toast surfaces the result. Verified: agent-eval →
+   `/plugin uninstall ecc@ecc`. (Real "move-to-backup" delete of standalone skills
+   considered but not taken — copy-command chosen for safety/consistency.)
+8. **Edit** item/config ⬜ — open file in external editor. **Check for updates** ⬜.
+   (Library row ⋯ menu also still a stub — future "more actions" affordance.)
 
 ## C. No on-disk concept (design decision)
 
