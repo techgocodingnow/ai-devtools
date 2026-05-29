@@ -63,7 +63,14 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
    extraKnownMarketplaces has no enabled field — and it filters which sources `loadFeed`
    pulls catalogs from. Verified: add (8→9) + remove (9→8) round-trip; settings.json
    restored identical. **Edit** still ⬜ (do as remove+re-add).
-6. **Install** (marketplace + Library) ⬜ — installs a plugin to disk.
+6. **Install** ✅ (copy-command) — there's no safe way to drive Claude's plugin installer
+   from here (its cache + installed_plugins.json + enabledPlugins are fragile to replicate,
+   and the sandbox blocks spawning git/unzip). So Install copies the **real** command
+   `/plugin install <plugin>@<marketplace>` to the clipboard + shows a toast to run it in
+   Claude. Library "Install…" now opens the Marketplace. Verified: clipboard held
+   `/plugin install agent-sdk-dev@claude-plugins-official`.
+   - Alternative left dormant: `PluginInstaller` (downloads repo zip → app Packages dir →
+     registry as origin:manual) — app-only visibility, sandbox-unzip risk. Not wired.
 7. **Remove** item ⬜ — deletes from disk (destructive).
 8. **Edit** item/config ⬜ — open file in external editor.
 

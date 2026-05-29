@@ -42,6 +42,22 @@ struct MarketplaceScreen: View {
                 .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 24)
             }
         }
+        .overlay(alignment: .bottom) {
+            if let toast = store.toast {
+                let t = theme.tokens
+                HStack(spacing: 8) {
+                    Sym(Icons.copy, size: 12).foregroundStyle(t.accent)
+                    Text(toast).font(.system(size: 11.5)).foregroundStyle(t.fg)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(RoundedRectangle(cornerRadius: Radius.lg).fill(t.bgElev))
+                .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(t.line, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                .padding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: store.toast)
     }
 
     /// Pick a real headline item: prefer a verified one, else the first in the feed.
@@ -71,7 +87,7 @@ struct MarketplaceScreen: View {
                 .font(.system(size: 11.5)).foregroundStyle(t.fg3).padding(.top, 12)
             }
             Spacer()
-            Btn(.primary) {} label: { Sym(Icons.download, size: 12); Text("Install") }
+            Btn(.primary, action: { store.copyInstallCommand(item) }) { Sym(Icons.download, size: 12); Text("Install") }
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: Radius.lg)
@@ -134,6 +150,7 @@ struct MarketplaceScreen: View {
 
 private struct FeedCard: View {
     @EnvironmentObject private var theme: ThemeManager
+    @EnvironmentObject private var store: AppStore
     @State private var hover = false
     let item: FeedItem
     let sourceName: String
@@ -162,7 +179,7 @@ private struct FeedCard: View {
                 }
                 .font(.system(size: 10.5)).foregroundStyle(t.fg3)
                 Spacer()
-                Btn(.normal, sm: true) {} label: { Sym(Icons.download, size: 11); Text("Install") }
+                Btn(.normal, sm: true, action: { store.copyInstallCommand(item) }) { Sym(Icons.download, size: 11); Text("Install") }
             }
         }
         .padding(14)

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AppKit
 
 enum Screen: Hashable {
     case library, itemDetail, marketplace, sources, groups, agents, hooks
@@ -114,6 +115,7 @@ final class AppStore: ObservableObject {
     @Published var loaded = false
     @Published var hookActionError: String?
     @Published var sourceActionError: String?
+    @Published var toast: String?
 
     // MARK: - Real backing stores / services
 
@@ -204,6 +206,26 @@ final class AppStore: ObservableObject {
             }
         }
         feed = feedItems.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// We can't safely drive Claude's plugin installer from here, so we hand the user the
+    /// exact command. Feed ids are `marketID/pluginName`.
+    func copyInstallCommand(_ item: FeedItem) {
+        let parts = item.id.split(separator: "/", maxSplits: 1).map(String.init)
+        let plugin = parts.count == 2 ? parts[1] : item.name
+        let market = parts.count == 2 ? parts[0] : item.market
+        let cmd = "/plugin install \(plugin)@\(market)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cmd, forType: .string)
+        showToast("Copied “\(cmd)” — run it in Claude Code")
+    }
+
+    private func showToast(_ message: String) {
+        toast = message
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if toast == message { toast = nil }
+        }
     }
 
     private var detectedAgents: [AgentDetectionService.DetectedAgent] = []

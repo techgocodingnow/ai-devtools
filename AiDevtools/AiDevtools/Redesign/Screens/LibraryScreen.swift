@@ -84,7 +84,7 @@ struct LibraryScreen: View {
                 SearchField(text: $store.search, placeholder: "Search items…").frame(width: 220)
                 statusSeg
                 viewSeg
-                Btn(.normal, sm: true) {} label: { Sym(Icons.download, size: 12); Text("Install…") }
+                Btn(.normal, sm: true, action: { store.nav(.marketplace) }) { Sym(Icons.download, size: 12); Text("Install…") }
             }
 
             ScrollView {
