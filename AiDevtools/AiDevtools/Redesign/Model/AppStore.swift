@@ -55,6 +55,13 @@ struct CustomGroup: Codable, Hashable, Identifiable {
     var members: [String]   // item ids
 }
 
+/// A user-registered agent (app-side), persisted in our container.
+struct CustomAgent: Codable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var binaryPath: String
+}
+
 struct HookRecord: Codable, Hashable {
     var id: String
     var wsID: String
@@ -151,6 +158,8 @@ final class AppStore: ObservableObject {
     private var enabledPlugins: [String: Bool] = [:]
     /// User-created groups (app-side only; Claude has no group concept). Persisted in our container.
     private var customGroups: [CustomGroup] = []
+    /// User-registered agents (app-side), shown alongside detected ones.
+    private var customAgents: [CustomAgent] = []
     /// Number of agent candidates the detector probes (for the scan card).
     @Published var agentCandidateCount: Int = 0
 
@@ -174,6 +183,7 @@ final class AppStore: ObservableObject {
         loadDisabledSources()
         enabledPlugins = settings.loadEnabledPlugins()
         loadCustomGroups()
+        loadCustomAgents()
 
         importer.runImport()
         for server in desktopConfig.loadServers() {
@@ -558,6 +568,70 @@ final class AppStore: ObservableObject {
         if let data = try? JSONEncoder().encode(arr) { try? data.write(to: disabledHooksURL, options: [.atomic]) }
     }
 
+    // MARK: - Agents
+
+    /// Reveal the agent's config directory in Finder (custom agents reveal their binary).
+    func openAgentConfig(_ id: String) {
+        let home = ClaudeHomeImporter.realHomeDirectory()
+        let dir: URL?
+        switch id {
+        case "claude-code": dir = home.appendingPathComponent(".claude")
+        case "codex": dir = home.appendingPathComponent(".codex")
+        case "cursor": dir = home.appendingPathComponent(".cursor")
+        case "gemini": dir = home.appendingPathComponent(".gemini")
+        default: dir = agents.first { $0.id == id }.map { URL(fileURLWithPath: $0.binary) }
+        }
+        guard let url = dir, FileManager.default.fileExists(atPath: url.path) else {
+            showToast("No config directory found for this agent."); return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Launch Terminal so the user can run the agent CLI.
+    func openAgentShell(_ id: String) {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"))
+    }
+
+    /// Present an open panel to register a custom agent binary/app.
+    func pickAndAddCustomAgent() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an agent binary or .app"
+        if panel.runModal() == .OK, let url = panel.url {
+            let name = url.deletingPathExtension().lastPathComponent
+            addCustomAgent(name: name, binaryPath: url.path)
+        }
+    }
+
+    func addCustomAgent(name: String, binaryPath: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var id = "agent-" + Self.slug(trimmed)
+        var n = 2
+        while agents.contains(where: { $0.id == id }) || customAgents.contains(where: { $0.id == id }) {
+            id = "agent-\(Self.slug(trimmed))-\(n)"; n += 1
+        }
+        customAgents.append(CustomAgent(id: id, name: trimmed, binaryPath: binaryPath))
+        saveCustomAgents(); rebuildAgents()
+    }
+
+    func removeCustomAgent(_ id: String) {
+        customAgents.removeAll { $0.id == id }
+        saveCustomAgents(); rebuildAgents()
+    }
+
+    private var customAgentsURL: URL { persistence.paths.directory.appendingPathComponent("custom_agents.json") }
+    private func loadCustomAgents() {
+        guard let data = try? Data(contentsOf: customAgentsURL),
+              let arr = try? JSONDecoder().decode([CustomAgent].self, from: data) else { return }
+        customAgents = arr
+    }
+    private func saveCustomAgents() {
+        if let data = try? JSONEncoder().encode(customAgents) { try? data.write(to: customAgentsURL, options: [.atomic]) }
+    }
+
     // MARK: - Rescan (real)
 
     func rescan() {
@@ -580,19 +654,22 @@ final class AppStore: ObservableObject {
     // MARK: - Projections
 
     private func rebuildAgents() {
-        agents = detectedAgents.map { d in
+        let detected = detectedAgents.map { d in
             AgentInfo(
-                id: d.id,
-                name: d.name,
-                vendor: d.vendor,
-                version: d.version ?? "—",
-                binary: d.binaryPath,
-                colorLCH: Self.agentColor(d.id),
-                initials: Self.agentInitials(d.id),
-                detected: d.detected,
-                supports: Self.agentSupports(d.id)
+                id: d.id, name: d.name, vendor: d.vendor, version: d.version ?? "—",
+                binary: d.binaryPath, colorLCH: Self.agentColor(d.id),
+                initials: Self.agentInitials(d.id), detected: d.detected, supports: Self.agentSupports(d.id)
             )
         }
+        let custom = customAgents.map { ca in
+            AgentInfo(
+                id: ca.id, name: ca.name, vendor: "Custom", version: "—",
+                binary: ca.binaryPath, colorLCH: LCH(l: 0.60, c: 0.12, h: Double(abs(ca.id.hashValue) % 360)),
+                initials: ca.name.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased(),
+                detected: true, supports: [.skill, .plugin, .mcp]
+            )
+        }
+        agents = detected + custom
     }
 
     private func rebuildWorkspaces() {

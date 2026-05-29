@@ -91,7 +91,12 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
    toggle flips every member's enabled state in the **current workspace** (via the item
    toggle path → registry.globalEnabled or project overrides). Claude never sees custom
    groups. Verified: create "My Stack" → add github → delete → sidecar back to `[]`.
-10. **Agents** ⬜ — "Open shell" / "Configure" / add-custom-agent.
+10. **Agents** ✅ — detection + rescan were already real. Now: Configure reveals the
+    agent's config dir (~/.claude, ~/.codex, ~/.cursor, ~/.gemini) in Finder; Open shell
+    launches Terminal; Add-custom-agent uses NSOpenPanel to pick a binary/.app and persists
+    an app-side CustomAgent (custom_agents.json) shown alongside detected agents, with a
+    Remove action. (External-launch actions verified by build + standard NSWorkspace/
+    NSOpenPanel APIs; not click-tested to avoid spawning apps mid-automation.)
 
 ## D. Unreviewed
 

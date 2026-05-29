@@ -44,15 +44,17 @@ struct AgentsScreen: View {
 
     private var addAgentCard: some View {
         let t = theme.tokens
-        return VStack(spacing: 6) {
-            Sym(Icons.plus, size: 16).foregroundStyle(t.fg3)
-            Text("Add a custom agent").font(.system(size: 12.5, weight: .medium)).foregroundStyle(t.fg)
-            Text("Point at any binary or config dir to register a new agent.").font(.system(size: 11)).foregroundStyle(t.fg3)
+        return Button(action: { store.pickAndAddCustomAgent() }) {
+            VStack(spacing: 6) {
+                Sym(Icons.plus, size: 16).foregroundStyle(t.fg3)
+                Text("Add a custom agent").font(.system(size: 12.5, weight: .medium)).foregroundStyle(t.fg)
+                Text("Point at any binary or config dir to register a new agent.").font(.system(size: 11)).foregroundStyle(t.fg3)
+            }
+            .frame(maxWidth: .infinity).padding(16)
+            .background(RoundedRectangle(cornerRadius: Radius.lg).fill(t.bgPanel.opacity(0.7)))
+            .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4])).foregroundStyle(t.line))
         }
-        .frame(maxWidth: .infinity).padding(16)
-        .background(RoundedRectangle(cornerRadius: Radius.lg).fill(t.bgPanel.opacity(0.7)))
-        .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4])).foregroundStyle(t.line))
-        .opacity(0.7)
+        .buttonStyle(.plain)
     }
 }
 
@@ -87,8 +89,11 @@ private struct AgentCard: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 6) {
-                    Btn(.normal, sm: true) {} label: { Sym(Icons.terminal, size: 12); Text("Open shell") }
-                    Btn(.ghost, sm: true) {} label: { Sym(Icons.cog, size: 12); Text("Configure") }
+                    Btn(.normal, sm: true, action: { store.openAgentShell(agent.id) }) { Sym(Icons.terminal, size: 12); Text("Open shell") }
+                    Btn(.ghost, sm: true, action: { store.openAgentConfig(agent.id) }) { Sym(Icons.cog, size: 12); Text("Configure") }
+                    if agent.vendor == "Custom" {
+                        Btn(.danger, sm: true, action: { store.removeCustomAgent(agent.id) }) { Sym(Icons.trash, size: 12); Text("Remove") }
+                    }
                 }
             }
         }
