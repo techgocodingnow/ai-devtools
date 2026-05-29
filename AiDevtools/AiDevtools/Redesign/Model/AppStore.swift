@@ -47,6 +47,14 @@ struct ItemDetailData {
 
 /// Everything needed to locate a hook command in a settings.json and to re-add it.
 /// Used both for active hooks (in-memory) and disabled ones (persisted sidecar).
+/// A user-created group: app-side only, persisted in our container.
+struct CustomGroup: Codable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var hue: Double
+    var members: [String]   // item ids
+}
+
 struct HookRecord: Codable, Hashable {
     var id: String
     var wsID: String
@@ -141,6 +149,8 @@ final class AppStore: ObservableObject {
     private var disabledSources: Set<String> = []
     /// `enabledPlugins` map from settings.json ("name@marketplace": Bool) — for uninstall commands.
     private var enabledPlugins: [String: Bool] = [:]
+    /// User-created groups (app-side only; Claude has no group concept). Persisted in our container.
+    private var customGroups: [CustomGroup] = []
     /// Number of agent candidates the detector probes (for the scan card).
     @Published var agentCandidateCount: Int = 0
 
@@ -163,6 +173,7 @@ final class AppStore: ObservableObject {
         loadDisabledHooks()
         loadDisabledSources()
         enabledPlugins = settings.loadEnabledPlugins()
+        loadCustomGroups()
 
         importer.runImport()
         for server in desktopConfig.loadServers() {
@@ -719,16 +730,95 @@ final class AppStore: ObservableObject {
     private func rebuildGroups() {
         var counts: [String: Int] = [:]
         for item in items { if let g = item.group { counts[g, default: 0] += 1 } }
-        groups = counts.keys.sorted().map { key in
+        let derived = counts.keys.sorted().map { key -> Group in
             let hue = Double(abs(key.hashValue) % 360)
             return Group(
                 id: key,
                 name: Self.prettify(key),
                 colorLCH: LCH(l: 0.66, c: 0.16, h: hue),
                 items: counts[key] ?? 0,
-                description: "\(counts[key] ?? 0) item\(counts[key] == 1 ? "" : "s") in this group."
+                description: "Derived from plugin / namespace — \(counts[key] ?? 0) item\(counts[key] == 1 ? "" : "s")."
             )
         }
+        let custom = customGroups.map { cg -> Group in
+            Group(
+                id: cg.id, name: cg.name, colorLCH: LCH(l: 0.66, c: 0.16, h: cg.hue),
+                items: cg.members.count,
+                description: "Custom group · \(cg.members.count) item\(cg.members.count == 1 ? "" : "s").",
+                custom: true, memberIDs: cg.members
+            )
+        }
+        groups = custom + derived
+        if !groups.contains(where: { $0.id == selectedGroup }) { selectedGroup = groups.first?.id ?? "" }
+    }
+
+    /// Items belonging to a group — explicit members for custom groups, derived match otherwise.
+    func members(of group: Group) -> [Item] {
+        if group.custom {
+            let set = Set(group.memberIDs)
+            return items.filter { set.contains($0.id) }
+        }
+        return items.filter { $0.group == group.id }
+    }
+
+    // MARK: - Group CRUD (app-persisted; Claude has no group concept)
+
+    func createGroup(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var id = "grp-" + Self.slug(trimmed)
+        var n = 2
+        while customGroups.contains(where: { $0.id == id }) || groups.contains(where: { $0.id == id }) {
+            id = "grp-\(Self.slug(trimmed))-\(n)"; n += 1
+        }
+        customGroups.append(CustomGroup(id: id, name: trimmed, hue: Double(abs(id.hashValue) % 360), members: []))
+        saveCustomGroups(); rebuildGroups(); selectedGroup = id
+    }
+
+    func renameGroup(_ id: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let i = customGroups.firstIndex(where: { $0.id == id }) else { return }
+        customGroups[i].name = trimmed
+        saveCustomGroups(); rebuildGroups()
+    }
+
+    func deleteGroup(_ id: String) {
+        customGroups.removeAll { $0.id == id }
+        saveCustomGroups(); rebuildGroups()
+    }
+
+    func addMember(_ itemID: String, toGroup id: String) {
+        guard let i = customGroups.firstIndex(where: { $0.id == id }) else { return }
+        if !customGroups[i].members.contains(itemID) { customGroups[i].members.append(itemID) }
+        saveCustomGroups(); rebuildGroups()
+    }
+
+    func removeMember(_ itemID: String, fromGroup id: String) {
+        guard let i = customGroups.firstIndex(where: { $0.id == id }) else { return }
+        customGroups[i].members.removeAll { $0 == itemID }
+        saveCustomGroups(); rebuildGroups()
+    }
+
+    /// True if every member of the group is enabled in the current workspace.
+    func groupEnabled(_ group: Group) -> Bool {
+        let m = members(of: group)
+        return !m.isEmpty && m.allSatisfy { $0.enabled[workspace] == true }
+    }
+
+    /// Flip every member's enabled state in the current workspace (enable all, or disable all).
+    func toggleGroup(_ group: Group) {
+        let enableAll = !groupEnabled(group)
+        for item in members(of: group) { applyEnable(item.id, ws: workspace, enableAll) }
+    }
+
+    private var customGroupsURL: URL { persistence.paths.directory.appendingPathComponent("custom_groups.json") }
+    private func loadCustomGroups() {
+        guard let data = try? Data(contentsOf: customGroupsURL),
+              let arr = try? JSONDecoder().decode([CustomGroup].self, from: data) else { return }
+        customGroups = arr
+    }
+    private func saveCustomGroups() {
+        if let data = try? JSONEncoder().encode(customGroups) { try? data.write(to: customGroupsURL, options: [.atomic]) }
     }
 
     private func rebuildMarketplaces() {

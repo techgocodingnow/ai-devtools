@@ -85,7 +85,12 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
 
 ## C. No on-disk concept (design decision)
 
-9. **Groups CRUD** ⬜ — Claude has no on-disk grouping; would be our own persisted store.
+9. **Groups CRUD** ✅ (app-side) — derived groups (plugin/namespace) stay read-only;
+   user-created groups are a persisted overlay (`custom_groups.json` in the container) with
+   create / rename / delete / add-member (searchable sheet) / remove-member. Per-group
+   toggle flips every member's enabled state in the **current workspace** (via the item
+   toggle path → registry.globalEnabled or project overrides). Claude never sees custom
+   groups. Verified: create "My Stack" → add github → delete → sidecar back to `[]`.
 10. **Agents** ⬜ — "Open shell" / "Configure" / add-custom-agent.
 
 ## D. Unreviewed

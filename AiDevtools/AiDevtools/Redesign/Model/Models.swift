@@ -111,6 +111,10 @@ struct Group: Identifiable, Hashable {
     let colorLCH: LCH
     let items: Int
     let description: String
+    /// True for user-created groups (editable); false for derived/structural groups.
+    var custom: Bool = false
+    /// Explicit member item ids — used only by custom groups (derived groups match on item.group).
+    var memberIDs: [String] = []
     var color: Color { colorLCH.color }
     var initials: String {
         name.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined()
