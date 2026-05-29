@@ -3,6 +3,7 @@ import SwiftUI
 struct ItemDetailScreen: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var theme: ThemeManager
+    @State private var detail = ItemDetailData()
 
     var body: some View {
         let t = theme.tokens
@@ -16,6 +17,7 @@ struct ItemDetailScreen: View {
                         .frame(width: 320)
                 }
             }
+            .task(id: store.openItemId) { detail = store.loadDetail(item.id) }
         )
     }
 
@@ -49,11 +51,11 @@ struct ItemDetailScreen: View {
             ScrollView {
                 SwiftUI.Group {
                     switch store.detailTab {
-                    case .overview: OverviewTab(item: item)
-                    case .config: ConfigTab(item: item)
+                    case .overview: OverviewTab(item: item, detail: detail)
+                    case .config: ConfigTab(item: item, detail: detail)
                     case .permissions: PermissionsTab(item: item)
                     case .logs: LogsTab(item: item)
-                    case .source: SourceTab(item: item)
+                    case .source: SourceTab(item: item, detail: detail)
                     }
                 }
                 .padding(.horizontal, 24).padding(.vertical, 18)
@@ -96,81 +98,84 @@ struct TabBar<T: Hashable>: View {
     }
 }
 
-// MARK: - Overview
+// MARK: - Shared
 
-private let SKILL_CAPS = [
-    ("instruction.md", "core prompt loaded when skill is invoked"),
-    ("tools.json", "declares helper tools the skill defines"),
-    ("examples/*", "reference examples seeded into agent context"),
-]
-private let PLUGIN_CAPS = [
-    ("manifest.json", "declares commands + hook surface area"),
-    ("pre-tool-use", "hooks before tool invocations"),
-    ("commands.*", "registers /commands in the agent CLI"),
-]
-private let CONN_CAPS = [
-    ("mcp.stdio", "spawns server via stdio transport"),
-    ("auth.oauth2", "requires OAuth handshake on first use"),
-    ("tools", "12 callable tools exposed over MCP"),
-]
-private let FILES = [
-    ("manifest.json", "482 B"), ("instruction.md", "4.2 KB"),
-    ("tools/read.py", "1.1 KB"), ("tools/parse.py", "3.4 KB"), ("examples/sample.pdf", "128 KB"),
-]
+/// Honest placeholder for tabs whose data source isn't wired yet (see docs/PENDING.md).
+private struct NotWiredCard: View {
+    @EnvironmentObject private var theme: ThemeManager
+    let title: String
+    let plan: String
+    var body: some View {
+        let t = theme.tokens
+        Card(padding: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Sym(Icons.info, size: 13).foregroundStyle(t.fg3)
+                    Text(title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(t.fg)
+                    Pill("not yet wired")
+                }
+                Text(plan).font(.system(size: 12)).foregroundStyle(t.fg3).lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+// MARK: - Overview
 
 private struct OverviewTab: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var theme: ThemeManager
     let item: Item
-
-    private var desc: String {
-        if let d = item.description { return d }
-        switch item.kind {
-        case .skill: return "A reusable agent instruction set — prompts, tools and helpers — packaged as a folder under SKILLS/."
-        case .plugin: return "A locally-installed plugin that extends the agent with custom commands, tool implementations or pre/post hooks."
-        case .mcp: return "An MCP server that exposes an external service to the agent over the Model Context Protocol."
-        }
-    }
-    private var caps: [(String, String)] { item.kind == .mcp ? CONN_CAPS : item.kind == .skill ? SKILL_CAPS : PLUGIN_CAPS }
+    let detail: ItemDetailData
 
     var body: some View {
         let t = theme.tokens
         VStack(alignment: .leading, spacing: 14) {
-            Text(desc).font(.system(size: 13)).lineSpacing(3).foregroundStyle(t.fg2)
+            if let d = item.description, !d.isEmpty {
+                Text(d).font(.system(size: 13)).lineSpacing(3).foregroundStyle(t.fg2)
+            }
 
             FlowRow(spacing: 8) {
                 if let g = store.group(item.group) {
                     Pill { Dot(color: g.color); Text(g.name) }
                 }
-                Pill { Sym(Icons.shieldOk, size: 10); Text("Signed by \(item.vendor)") }
-                Pill("Updated \(item.updated)")
+                Pill { Sym(Icons.box, size: 10); Text(detail.origin) }
+                if item.updated != "—" { Pill("Updated \(item.updated)") }
                 if item.size != "—" { Pill(item.size) }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Subtitle("Capabilities")
-                ForEach(caps, id: \.0) { name, d in
-                    HStack(spacing: 8) {
-                        Sym(Icons.check, size: 12).foregroundStyle(t.ok)
-                        Text(name).mono(11).foregroundStyle(t.fg2)
-                        Text(d).font(.system(size: 12)).foregroundStyle(t.fg3)
+            if !detail.capabilities.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Subtitle("Metadata")
+                    ForEach(detail.capabilities) { cap in
+                        HStack(alignment: .top, spacing: 8) {
+                            Sym(Icons.check, size: 12).foregroundStyle(t.ok)
+                            Text(cap.label).mono(11).foregroundStyle(t.fg2).frame(width: 110, alignment: .leading)
+                            Text(cap.detail).font(.system(size: 12)).foregroundStyle(t.fg3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Subtitle("Files")
-                Card(padding: 0) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(FILES.enumerated()), id: \.element.0) { idx, f in
-                            HStack(spacing: 8) {
-                                Sym(Icons.box, size: 11).foregroundStyle(t.fg3)
-                                Text(f.0).mono(11).foregroundStyle(t.fg2)
-                                Spacer()
-                                Text(f.1).font(.system(size: 11.5)).foregroundStyle(t.fg3)
+                if detail.files.isEmpty {
+                    Text("No files on disk for this item.").font(.system(size: 12)).foregroundStyle(t.fg3)
+                } else {
+                    Card(padding: 0) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(detail.files.enumerated()), id: \.element.id) { idx, f in
+                                HStack(spacing: 8) {
+                                    Sym(Icons.box, size: 11).foregroundStyle(t.fg3)
+                                    Text(f.name).mono(11).foregroundStyle(t.fg2)
+                                    Spacer()
+                                    Text(f.size).font(.system(size: 11.5)).foregroundStyle(t.fg3)
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .overlay(alignment: .bottom) { if idx < detail.files.count - 1 { t.lineSoft.frame(height: 0.5) } }
                             }
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .overlay(alignment: .bottom) { if idx < FILES.count - 1 { t.lineSoft.frame(height: 0.5) } }
                         }
                     }
                 }
@@ -179,158 +184,99 @@ private struct OverviewTab: View {
     }
 }
 
-// MARK: - Configuration
+// MARK: - Configuration (real file body)
 
 private struct ConfigTab: View {
     @EnvironmentObject private var theme: ThemeManager
     let item: Item
+    let detail: ItemDetailData
     var body: some View {
         let t = theme.tokens
         VStack(alignment: .leading, spacing: 14) {
-            Card(padding: 0) {
-                VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        Sym(Icons.cog, size: 12).foregroundStyle(t.fg3)
-                        Text("config.json").font(.system(size: 12, weight: .semibold)).foregroundStyle(t.fg)
-                        Spacer()
-                        Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.copy, size: 12) }
-                        Btn(.ghost, sm: true) {} label: { Sym(Icons.edit, size: 12); Text("Edit") }
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .overlay(alignment: .bottom) { t.lineSoft.frame(height: 0.5) }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        jsonText.padding(.horizontal, 16).padding(.vertical, 12)
-                    }
-                    .background(t.bgSidebar)
-                }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Subtitle("Environment")
-                ForEach(env, id: \.0) { k, v in
-                    HStack {
-                        Text(k).mono(11).foregroundStyle(t.fg3).frame(width: 130, alignment: .leading)
-                        Text(v).mono(11).foregroundStyle(t.fg2)
-                        Spacer()
-                        Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.edit, size: 11) }
-                    }
-                }
-            }
-        }
-    }
-    private var env: [(String, String)] {
-        [("LOG_LEVEL", "info"), ("MAX_TOKENS", "8192"), ("CACHE_DIR", "~/.cache/agent/\(item.id)")]
-    }
-    private var jsonText: Text {
-        let agents = item.agents.map { "\"\($0)\"" }.joined(separator: ", ")
-        func k(_ s: String) -> Text { Text("\"\(s)\"").foregroundColor(CodeColor.key) }
-        func str(_ s: String) -> Text { Text("\"\(s)\"").foregroundColor(CodeColor.string) }
-        func n(_ s: String) -> Text { Text(s).foregroundColor(CodeColor.number) }
-        let p = Text("  ")
-        return Text("{\n") + p + k("name") + Text(": ") + str(item.name) + Text(",\n")
-            + p + k("version") + Text(": ") + str(item.version) + Text(",\n")
-            + p + k("agents") + Text(": [\(agents)],\n")
-            + p + k("timeout_ms") + Text(": ") + n("30000") + Text(",\n")
-            + p + k("max_concurrent") + Text(": ") + n("3") + Text(",\n")
-            + p + Text("// Edit this file directly in the editor").foregroundColor(CodeColor.comment) + Text("\n")
-            + p + k("options") + Text(": {\n")
-            + Text("    ") + k("verbose") + Text(": ") + n("false") + Text(",\n")
-            + Text("    ") + k("telemetry") + Text(": ") + n("true") + Text("\n")
-            + p + Text("}\n}")
-    }
-}
-
-// MARK: - Permissions
-
-private struct PermissionsTab: View {
-    @EnvironmentObject private var theme: ThemeManager
-    let item: Item
-    private var perms: [(String, String, [String])] {
-        let token = "ATK_" + item.id.uppercased().replacingOccurrences(of: "-", with: "_") + "_TOKEN"
-        return [
-            ("Filesystem", "Read-only", ["./*", "~/.cache"]),
-            ("Network", "Outbound HTTPS", ["api.\(item.id).com"]),
-            ("Shell", "Denied", []),
-            ("Secrets", "1 secret", [token]),
-        ]
-    }
-    var body: some View {
-        let t = theme.tokens
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(perms, id: \.0) { area, scope, paths in
-                Card(padding: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Sym(Icons.shield, size: 13).foregroundStyle(scope == "Denied" ? t.fg3 : t.accent)
-                            Text(area).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(t.fg)
+            if let text = detail.configText, !text.isEmpty {
+                Card(padding: 0) {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Sym(Icons.cog, size: 12).foregroundStyle(t.fg3)
+                            Text(detail.configFileName ?? "config").font(.system(size: 12, weight: .semibold)).foregroundStyle(t.fg)
                             Spacer()
-                            Pill(scope)
-                        }
-                        if !paths.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
-                                ForEach(paths, id: \.self) { Text($0).mono(11).foregroundStyle(t.fg3) }
+                            if let path = detail.locationPath {
+                                Text(path).mono(10.5).foregroundStyle(t.fg3).lineLimit(1)
                             }
                         }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .overlay(alignment: .bottom) { t.lineSoft.frame(height: 0.5) }
+                        ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                            Text(text)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(t.fg2)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 16).padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 460)
+                        .background(t.bgSidebar)
                     }
                 }
+            } else {
+                Text("No configuration file found for this item.")
+                    .font(.system(size: 12)).foregroundStyle(t.fg3)
             }
         }
     }
 }
 
-// MARK: - Activity (logs)
+// MARK: - Permissions (not yet wired — see docs/PENDING.md #1)
+
+private struct PermissionsTab: View {
+    let item: Item
+    var body: some View {
+        NotWiredCard(
+            title: "Permissions",
+            plan: "Per-item permissions aren't stored on disk. Planned: read permissions.allow / deny / ask from ~/.claude/settings.json and surface the global rules that apply to this item (its MCP tool names or plugin commands)."
+        )
+    }
+}
+
+// MARK: - Activity (not yet wired — see docs/PENDING.md #1)
 
 private struct LogsTab: View {
-    @EnvironmentObject private var theme: ThemeManager
     let item: Item
-    private var logs: [(String, String, String)] {
-        [("13:42:08", "info", "tool.invoke parse_pdf(input.pdf) → 12 pages"),
-         ("13:42:06", "info", "tool.invoke read_pdf(input.pdf) → 482 KB"),
-         ("13:39:51", "warn", "cache miss for \(item.id)/result-2a4f, refetching"),
-         ("13:38:14", "info", "loaded skill \(item.id) v\(item.version) (142 KB)"),
-         ("11:02:33", "error", "request timed out after 30000ms (host: api.local)"),
-         ("Yest 18:22", "info", "enabled in workspace mcp-tooling")]
-    }
     var body: some View {
-        let t = theme.tokens
-        CodeBlock(padding: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(logs, id: \.0) { time, lvl, msg in
-                    (Text("[\(time)] ").foregroundColor(CodeColor.comment)
-                     + Text(lvl.padding(toLength: 5, withPad: " ", startingAt: 0) + " ")
-                        .foregroundColor(lvl == "error" ? t.err : lvl == "warn" ? t.warn : Color.oklch(0.74, 0.13, 290))
-                     + Text(msg).foregroundColor(t.fg2))
-                        .font(.system(size: 11.5, design: .monospaced))
-                }
-            }
-        }
+        NotWiredCard(
+            title: "Activity",
+            plan: "No per-item activity feed exists yet. Planned: mine local logs (history.jsonl, projects/*/ session transcripts, telemetry/) for events referencing this item. Requires a log-indexing pass; deferred."
+        )
     }
 }
 
-// MARK: - Source
+// MARK: - Source (real path + origin)
 
 private struct SourceTab: View {
     @EnvironmentObject private var theme: ThemeManager
     let item: Item
+    let detail: ItemDetailData
     var body: some View {
         let t = theme.tokens
         VStack(alignment: .leading, spacing: 14) {
             Card(padding: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Subtitle("Installed from")
+                    Subtitle("Origin")
                     HStack {
-                        Sym(Icons.shop, size: 14).foregroundStyle(t.fg3)
-                        Text(item.vendor.hasPrefix("community") ? "Community Hub" : item.vendor.hasPrefix("kuro") ? "kuro/tools" : "Anthropic Official")
-                            .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(t.fg)
-                        Pill(item.vendor.hasPrefix("community") ? "community" : "verified", style: .accent)
+                        Sym(Icons.box, size: 14).foregroundStyle(t.fg3)
+                        Text(detail.origin).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(t.fg)
                     }
-                    Text("https://hub.agenttools.dev/\(item.vendor)/\(item.id)").mono(11).foregroundStyle(t.fg3)
+                    if let src = detail.sourcePath {
+                        Text(src).mono(11).foregroundStyle(t.fg3).textSelection(.enabled)
+                    }
                 }
             }
-            Card(padding: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Subtitle("Local install path")
-                    Text("~/.agent/\(item.kind == .skill ? "skills" : item.kind == .plugin ? "plugins" : "mcp")/\(item.id)/")
-                        .mono(11.5).foregroundStyle(t.fg)
+            if let path = detail.locationPath {
+                Card(padding: 14) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Subtitle("Local path")
+                        Text(path).mono(11.5).foregroundStyle(t.fg).textSelection(.enabled)
+                    }
                 }
             }
         }

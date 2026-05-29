@@ -30,6 +30,20 @@ enum DetailTab: String, CaseIterable { case overview, config, permissions, logs,
 }
 enum HookStatusFilter: String { case all, enabled, disabled, untrusted, issues }
 
+/// Real, on-demand detail for one item — read from disk when the detail screen opens.
+struct ItemDetailData {
+    var origin: String = "—"
+    var locationPath: String?                       // abbreviated install path
+    var files: [FileEntry] = []                     // directory listing
+    var capabilities: [Capability] = []             // real metadata facts
+    var configFileName: String?                     // e.g. "SKILL.md", "plugin.json"
+    var configText: String?                         // real file body (capped)
+    var sourcePath: String?                         // where it came from / lives
+
+    struct FileEntry: Identifiable, Hashable { var id: String { name }; let name: String; let size: String }
+    struct Capability: Identifiable, Hashable { var id: String { label }; let label: String; let detail: String }
+}
+
 /// Single source of truth for the redesigned UI.
 ///
 /// Backed by the real on-disk registry (`~/.claude`), Claude Desktop config, project
@@ -508,6 +522,131 @@ final class AppStore: ObservableObject {
             }
         }
         hooks = result
+    }
+
+    // MARK: - On-demand item detail (real, read from disk)
+
+    func loadDetail(_ id: String) -> ItemDetailData {
+        guard let ref = itemRefs[id] else { return ItemDetailData() }
+        switch ref.kind {
+        case .skill:     return skillDetail(ref)
+        case .plugin:    return pluginDetail(ref)
+        case .mcpServer: return mcpDetail(ref)
+        case .connector: return ItemDetailData()
+        }
+    }
+
+    private func skillDetail(_ ref: CapabilityRef) -> ItemDetailData {
+        guard let s = registry.skills[ref.id] else { return ItemDetailData() }
+        var d = ItemDetailData(origin: s.origin.displayLabel)
+        d.locationPath = Self.abbreviate(s.location.path)
+        d.sourcePath = Self.abbreviate(s.skillFile.path)
+        d.files = Self.listDirectory(s.location)
+        d.capabilities = Self.frontmatterFacts(s.skillFile)
+        d.configFileName = "SKILL.md"
+        d.configText = Self.readCapped(s.skillFile)
+        return d
+    }
+
+    private func pluginDetail(_ ref: CapabilityRef) -> ItemDetailData {
+        guard let p = registry.plugins[ref.id] else { return ItemDetailData() }
+        var d = ItemDetailData(origin: p.origin.displayLabel)
+        d.locationPath = Self.abbreviate(p.rootDirectory.path)
+        d.sourcePath = Self.abbreviate(p.rootDirectory.path)
+        d.files = Self.listDirectory(p.rootDirectory)
+        var caps: [ItemDetailData.Capability] = [
+            .init(label: "version", detail: p.version ?? "—"),
+            .init(label: "skills", detail: "\(p.skillIDs.count)"),
+            .init(label: "mcp servers", detail: "\(p.mcpServerIDs.count)"),
+        ]
+        if !p.tags.isEmpty { caps.append(.init(label: "tags", detail: p.tags.joined(separator: ", "))) }
+        d.capabilities = caps
+        let manifest = p.rootDirectory.appendingPathComponent(".claude-plugin/plugin.json")
+        d.configFileName = "plugin.json"
+        d.configText = Self.readCapped(manifest)
+        return d
+    }
+
+    private func mcpDetail(_ ref: CapabilityRef) -> ItemDetailData {
+        guard let m = registry.mcpServers[ref.id] else { return ItemDetailData() }
+        var d = ItemDetailData(origin: m.origin.displayLabel)
+        d.capabilities = [
+            .init(label: "transport", detail: m.isStdio ? "stdio" : "http"),
+            .init(label: "endpoint", detail: m.transportSummary),
+            .init(label: "auth", detail: m.authType ?? "none"),
+            .init(label: "env vars", detail: "\(m.env.count)"),
+        ]
+        switch m.origin {
+        case .claudeDesktop: d.sourcePath = Self.abbreviate(desktopConfig.configURL.path)
+        case .claudeHome:    d.sourcePath = "~/.claude/.mcp.json"
+        case .plugin:        d.sourcePath = ownerPluginPath(forMCP: m.id)
+        case .manual:        d.sourcePath = "Added in-app"
+        }
+        d.configFileName = ".mcp.json"
+        d.configText = Self.mcpConfigJSON(m)
+        return d
+    }
+
+    private func ownerPluginPath(forMCP id: UUID) -> String? {
+        for plugin in registry.plugins.values where plugin.mcpServerIDs.contains(id) {
+            return Self.abbreviate(plugin.rootDirectory.appendingPathComponent(".mcp.json").path)
+        }
+        return nil
+    }
+
+    static func mcpConfigJSON(_ m: MCPServer) -> String {
+        var entry: [String: Any] = [:]
+        if let url = m.serverURL { entry["url"] = url.absoluteString }
+        if let cmd = m.command { entry["command"] = cmd; if !m.args.isEmpty { entry["args"] = m.args } }
+        if !m.env.isEmpty { entry["env"] = m.env }
+        if !m.description.isEmpty { entry["description"] = m.description }
+        if let auth = m.authType { entry["authType"] = auth }
+        let root: [String: Any] = ["mcpServers": [m.label: entry]]
+        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]),
+              let s = String(data: data, encoding: .utf8) else { return "{}" }
+        return s
+    }
+
+    static func listDirectory(_ url: URL, max: Int = 60) -> [ItemDetailData.FileEntry] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey], options: [.skipsHiddenFiles]
+        ) else { return [] }
+        let sorted = entries.sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+        return sorted.prefix(max).map { entry in
+            var isDir: ObjCBool = false
+            fm.fileExists(atPath: entry.path, isDirectory: &isDir)
+            let name = entry.lastPathComponent + (isDir.boolValue ? "/" : "")
+            return ItemDetailData.FileEntry(name: name, size: isDir.boolValue ? "dir" : directorySize(entry))
+        }
+    }
+
+    /// Read a text file, capped so the UI never tries to render a huge blob.
+    static func readCapped(_ url: URL, maxBytes: Int = 16_384) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let slice = data.prefix(maxBytes)
+        guard var text = String(data: slice, encoding: .utf8) else { return nil }
+        if data.count > maxBytes { text += "\n… (truncated)" }
+        return text
+    }
+
+    /// Top-level YAML-ish frontmatter keys → capability facts.
+    static func frontmatterFacts(_ url: URL) -> [ItemDetailData.Capability] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [] }
+        var facts: [ItemDetailData.Capability] = []
+        for raw in lines.dropFirst() {
+            let line = String(raw)
+            if line.trimmingCharacters(in: .whitespaces) == "---" { break }
+            if let colon = line.firstIndex(of: ":"), !line.hasPrefix("  "), !line.hasPrefix("-") {
+                let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+                var value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+                if value.count > 140 { value = String(value.prefix(140)) + "…" }
+                if !key.isEmpty { facts.append(.init(label: key, detail: value)) }
+            }
+        }
+        return facts
     }
 
     // MARK: - Static mapping helpers
