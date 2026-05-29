@@ -248,6 +248,63 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Open the item's real file in the system default editor.
+    func openItemFile(_ id: String) {
+        guard let ref = itemRefs[id], let url = itemFileURL(ref) else {
+            showToast("No editable file for this item."); return
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            showToast("File not found: \(Self.abbreviate(url.path))"); return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reveal the item's file or folder in Finder.
+    func revealItemInFinder(_ id: String) {
+        guard let ref = itemRefs[id], let url = itemRevealURL(ref) else {
+            showToast("Nothing to reveal for this item."); return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Symmetric update command for plugin items.
+    func copyUpdateCommand(_ id: String) {
+        guard let ref = itemRefs[id], let plugin = owningPlugin(for: ref) else {
+            showToast("No update command for this item."); return
+        }
+        let cmd = "/plugin update \(pluginQualifiedName(plugin))"
+        copyToClipboard(cmd)
+        showToast("Copied “\(cmd)” — run it in Claude Code")
+    }
+
+    private func mcpConfigURL(_ origin: CapabilityOrigin, mcpID: UUID) -> URL? {
+        switch origin {
+        case .claudeDesktop: return desktopConfig.configURL
+        case .claudeHome: return ClaudeHomeImporter.realHomeDirectory().appendingPathComponent(".claude/.mcp.json")
+        case .plugin: return registry.plugins.values.first { $0.mcpServerIDs.contains(mcpID) }?
+                .rootDirectory.appendingPathComponent(".mcp.json")
+        case .manual: return nil
+        }
+    }
+
+    private func itemFileURL(_ ref: CapabilityRef) -> URL? {
+        switch ref.kind {
+        case .skill: return registry.skills[ref.id]?.skillFile
+        case .plugin: return registry.plugins[ref.id]?.rootDirectory.appendingPathComponent(".claude-plugin/plugin.json")
+        case .mcpServer: return registry.mcpServers[ref.id].flatMap { mcpConfigURL($0.origin, mcpID: $0.id) }
+        default: return nil
+        }
+    }
+
+    private func itemRevealURL(_ ref: CapabilityRef) -> URL? {
+        switch ref.kind {
+        case .skill: return registry.skills[ref.id]?.location
+        case .plugin: return registry.plugins[ref.id]?.rootDirectory
+        case .mcpServer: return registry.mcpServers[ref.id].flatMap { mcpConfigURL($0.origin, mcpID: $0.id) }
+        default: return nil
+        }
+    }
+
     private func owningPlugin(for ref: CapabilityRef) -> Plugin? {
         switch ref.kind {
         case .plugin: return registry.plugins[ref.id]

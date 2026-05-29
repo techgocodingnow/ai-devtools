@@ -77,8 +77,11 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
    point at their config file. Global toast surfaces the result. Verified: agent-eval →
    `/plugin uninstall ecc@ecc`. (Real "move-to-backup" delete of standalone skills
    considered but not taken — copy-command chosen for safety/consistency.)
-8. **Edit** item/config ⬜ — open file in external editor. **Check for updates** ⬜.
-   (Library row ⋯ menu also still a stub — future "more actions" affordance.)
+8. **Edit / Reveal / Check for updates** ✅ — Edit opens the item's real file
+   (SKILL.md / plugin.json / .mcp.json / desktop config) in the default editor via
+   NSWorkspace; Reveal selects it in Finder; Check-for-updates copies
+   `/plugin update <plugin>@<marketplace>`. Verified: agent-eval →
+   `/plugin update ecc@ecc`. (Library row ⋯ menu still a stub — future affordance.)
 
 ## C. No on-disk concept (design decision)
 

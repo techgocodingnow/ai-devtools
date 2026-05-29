@@ -38,8 +38,9 @@ struct ItemDetailScreen: View {
                 }
             }
             Spacer()
-            Btn(.ghost, sm: true) {} label: { Sym(Icons.refresh, size: 12); Text("Check for updates") }
-            Btn(.normal, sm: true) {} label: { Sym(Icons.edit, size: 12); Text("Edit") }
+            Btn(.ghost, sm: true, action: { store.copyUpdateCommand(item.id) }) { Sym(Icons.refresh, size: 12); Text("Check for updates") }
+            Btn(.ghost, sm: true, action: { store.revealItemInFinder(item.id) }) { Sym(Icons.folder, size: 12); Text("Reveal") }
+            Btn(.normal, sm: true, action: { store.openItemFile(item.id) }) { Sym(Icons.edit, size: 12); Text("Edit") }
             Btn(.danger, sm: true, action: { store.copyRemoveCommand(item.id) }) { Sym(Icons.trash, size: 12); Text("Remove…") }
         }
     }
