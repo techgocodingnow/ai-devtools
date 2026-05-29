@@ -42,7 +42,8 @@ struct Sidebar: View {
                     }
 
                     SectionHeader("Discover")
-                    SidebarRow(icon: Icons.shop, label: "Marketplace", badge: "124 new",
+                    SidebarRow(icon: Icons.shop, label: "Marketplace",
+                               badge: store.marketplaces.isEmpty ? nil : "\(store.marketplaces.count) src",
                                active: store.screen == .marketplace) { store.nav(.marketplace) }
                     SidebarRow(icon: Icons.globe, label: "Sources",
                                active: store.screen == .sources) { store.nav(.sources) }

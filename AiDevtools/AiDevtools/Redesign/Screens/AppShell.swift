@@ -136,9 +136,8 @@ struct StatusBar: View {
                 Text("\(issues) issue\(issues > 1 ? "s" : "")").foregroundStyle(t.warn)
             }
             Spacer()
-            Text("3 agents detected")
-            Text("·")
-            Text("auto-sync 2m ago")
+            let detected = store.agents.filter { $0.detected }.count
+            Text("\(detected) agent\(detected == 1 ? "" : "s") detected")
             Text("·")
             HStack(spacing: 6) { Dot(color: t.ok, ring: true); Text("online") }
         }

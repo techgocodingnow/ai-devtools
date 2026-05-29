@@ -23,7 +23,7 @@ public struct ClaudeHomeImporter {
     /// Real user home directory — bypasses sandbox container redirection.
     /// `FileManager.homeDirectoryForCurrentUser` returns the container under sandbox;
     /// `getpwuid` returns the actual home (`/Users/<name>`).
-    public static func realHomeDirectory() -> URL {
+    public nonisolated static func realHomeDirectory() -> URL {
         if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
             return URL(fileURLWithPath: String(cString: dir))
         }
