@@ -56,7 +56,13 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
    **Trust/block + untrusted banner**: kept in place but **inert** — settings.json has no
    "untrusted hook" concept, so these never trigger with real data. Left for a future
    trust model rather than removed. The untrusted status filter is likewise dormant.
-5. **Sources add/edit/remove** ⬜ — writes `extraKnownMarketplaces` in settings.json.
+5. **Sources add/remove + toggle** ✅ (global) — Add-form appends a marketplace to
+   `extraKnownMarketplaces` (git URL → git/url, `owner/repo` → github/repo); per-source
+   trash removes it (with a confirm dialog). Both backup-first via `ClaudeSettingsWriter`.
+   Enable/disable is an **app-persisted fetch flag** (`disabled_sources.json` sidecar) —
+   extraKnownMarketplaces has no enabled field — and it filters which sources `loadFeed`
+   pulls catalogs from. Verified: add (8→9) + remove (9→8) round-trip; settings.json
+   restored identical. **Edit** still ⬜ (do as remove+re-add).
 6. **Install** (marketplace + Library) ⬜ — installs a plugin to disk.
 7. **Remove** item ⬜ — deletes from disk (destructive).
 8. **Edit** item/config ⬜ — open file in external editor.

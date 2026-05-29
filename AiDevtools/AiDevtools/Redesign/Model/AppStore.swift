@@ -113,6 +113,7 @@ final class AppStore: ObservableObject {
     @Published var scanning = false
     @Published var loaded = false
     @Published var hookActionError: String?
+    @Published var sourceActionError: String?
 
     // MARK: - Real backing stores / services
 
@@ -134,6 +135,8 @@ final class AppStore: ObservableObject {
     private var hookRecords: [String: HookRecord] = [:]
     /// Hooks the user disabled — removed from settings.json, stashed here so they can be re-enabled.
     private var disabledHooks: [String: HookRecord] = [:]
+    /// Marketplace ids the user turned off (app-persisted; extraKnownMarketplaces has no enabled flag).
+    private var disabledSources: Set<String> = []
     /// Number of agent candidates the detector probes (for the scan card).
     @Published var agentCandidateCount: Int = 0
 
@@ -154,6 +157,7 @@ final class AppStore: ObservableObject {
         try? persistence.loadRegistry(into: registry)
         try? persistence.loadProjects(into: projectsStore)
         loadDisabledHooks()
+        loadDisabledSources()
 
         importer.runImport()
         for server in desktopConfig.loadServers() {
@@ -178,8 +182,10 @@ final class AppStore: ObservableObject {
     /// Fetch the plugin catalog for each GitHub-backed marketplace and project it into the feed.
     /// Also backfills each source's item count. Network-best-effort; failures leave the feed empty.
     func loadFeed() async {
-        let sources = marketplaces.compactMap { MarketplaceCatalogService.source(id: $0.id, url: $0.url) }
-        guard !sources.isEmpty else { return }
+        let sources = marketplaces
+            .filter { $0.enabled }
+            .compactMap { MarketplaceCatalogService.source(id: $0.id, url: $0.url) }
+        guard !sources.isEmpty else { feed = []; return }
         let results = await catalog.fetchAll(sources)
 
         var feedItems: [FeedItem] = []
@@ -283,11 +289,57 @@ final class AppStore: ObservableObject {
         persistence.scheduleSave(registry: registry, projects: projectsStore)
     }
 
-    // MARK: - Marketplace
+    // MARK: - Marketplace sources
 
+    /// Enable/disable a source for feed fetching. App-persisted (not in settings.json).
     func toggleMarketplace(_ id: String, _ value: Bool) {
-        guard let i = marketplaces.firstIndex(where: { $0.id == id }) else { return }
-        marketplaces[i].enabled = value
+        if value { disabledSources.remove(id) } else { disabledSources.insert(id) }
+        saveDisabledSources()
+        rebuildMarketplaces()
+        Task { await loadFeed() }
+    }
+
+    /// Add a marketplace to `extraKnownMarketplaces`. `input` is a full git URL or `owner/repo`.
+    func addSource(name: String, input: String) {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { sourceActionError = "Repository is empty."; return }
+        let id = Self.slug(name.isEmpty ? trimmed : name)
+        guard !id.isEmpty else { sourceActionError = "Couldn't derive a source id."; return }
+
+        let kind: String, key: String
+        if trimmed.contains("://") { kind = "git"; key = "url" }
+        else if trimmed.split(separator: "/").count == 2 { kind = "github"; key = "repo" }
+        else { sourceActionError = "Enter a git URL or owner/repo."; return }
+
+        do {
+            try settingsWriter.addMarketplace(at: settings.settingsURL, id: id, sourceKind: kind, locationKey: key, location: trimmed)
+            rebuildMarketplaces()
+            Task { await loadFeed() }
+        } catch { sourceActionError = "Couldn't add source: \(error.localizedDescription)" }
+    }
+
+    /// Remove a marketplace key from `extraKnownMarketplaces`.
+    func removeSource(_ id: String) {
+        do {
+            let removed = try settingsWriter.removeMarketplace(at: settings.settingsURL, id: id)
+            guard removed else { sourceActionError = "Source not found."; return }
+            disabledSources.remove(id)
+            saveDisabledSources()
+            rebuildMarketplaces()
+            Task { await loadFeed() }
+        } catch { sourceActionError = "Couldn't remove source: \(error.localizedDescription)" }
+    }
+
+    private var disabledSourcesURL: URL { persistence.paths.directory.appendingPathComponent("disabled_sources.json") }
+    private func loadDisabledSources() {
+        guard let data = try? Data(contentsOf: disabledSourcesURL),
+              let arr = try? JSONDecoder().decode([String].self, from: data) else { return }
+        disabledSources = Set(arr)
+    }
+    private func saveDisabledSources() {
+        if let data = try? JSONEncoder().encode(Array(disabledSources)) {
+            try? data.write(to: disabledSourcesURL, options: [.atomic])
+        }
     }
 
     // MARK: - Hooks (real enable/disable: backup settings.json, stash entry in sidecar)
@@ -561,7 +613,7 @@ final class AppStore: ObservableObject {
             let trust: MarketTrust = isOfficial ? .verified : (kind == .github ? .pinned : .community)
             return MarketplaceSource(
                 id: m.id, name: Self.prettify(m.id), url: m.url,
-                kind: kind, items: 0, lastSync: "—", enabled: true, trust: trust
+                kind: kind, items: 0, lastSync: "—", enabled: !disabledSources.contains(m.id), trust: trust
             )
         }
         feed = []   // no catalog endpoint configured yet → real empty state

@@ -189,19 +189,38 @@ struct Label2: View {
 struct SourcesScreen: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var theme: ThemeManager
+    @State private var confirmRemove: MarketplaceSource?
     var body: some View {
+        let t = theme.tokens
         VStack(spacing: 0) {
             ScreenToolbar {
                 ScreenHeader("Sources") { Text("Manage marketplace providers and repositories") }
                 Spacer()
-                Btn(.normal, sm: true) {} label: { Sym(Icons.plus, size: 12); Text("Add source…") }
+            }
+            if let err = store.sourceActionError {
+                HStack(spacing: 10) {
+                    Sym(Icons.alert, size: 14).foregroundStyle(t.err)
+                    Text(err).font(.system(size: 11.5)).foregroundStyle(t.fg2)
+                    Spacer()
+                    Btn("Dismiss", .ghost, sm: true) { store.sourceActionError = nil }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.oklch(0.66, 0.20, 25, 0.12)))
+                .padding(.horizontal, 16).padding(.top, 10)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Card(padding: 0) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(store.marketplaces.enumerated()), id: \.element.id) { idx, m in
-                                SourceRow(source: m, last: idx == store.marketplaces.count - 1)
+                    if store.marketplaces.isEmpty {
+                        Text("No marketplace sources. Add one below.")
+                            .font(.system(size: 12)).foregroundStyle(t.fg3).padding(.vertical, 8)
+                    } else {
+                        Card(padding: 0) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(store.marketplaces.enumerated()), id: \.element.id) { idx, m in
+                                    SourceRow(source: m, last: idx == store.marketplaces.count - 1,
+                                              onRefresh: { Task { await store.loadFeed() } },
+                                              onRemove: { confirmRemove = m })
+                                }
                             }
                         }
                     }
@@ -209,6 +228,15 @@ struct SourcesScreen: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 14)
             }
+        }
+        .alert("Remove source?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } })) {
+            Button("Cancel", role: .cancel) { confirmRemove = nil }
+            Button("Remove", role: .destructive) {
+                if let s = confirmRemove { store.removeSource(s.id) }
+                confirmRemove = nil
+            }
+        } message: {
+            Text("Removes “\(confirmRemove?.name ?? "")” from ~/.claude/settings.json (backed up first).")
         }
     }
 }
@@ -218,6 +246,8 @@ private struct SourceRow: View {
     @EnvironmentObject private var theme: ThemeManager
     let source: MarketplaceSource
     let last: Bool
+    var onRefresh: () -> Void = {}
+    var onRemove: () -> Void = {}
     var body: some View {
         let t = theme.tokens
         HStack(spacing: 14) {
@@ -235,10 +265,9 @@ private struct SourceRow: View {
                 }
             }
             Spacer()
-            Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.refresh, size: 12) }
-            Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.edit, size: 12) }
+            Btn(.ghost, sm: true, iconOnly: true, action: onRefresh) { Sym(Icons.refresh, size: 12) }
             ATToggle(isOn: source.enabled) { store.toggleMarketplace(source.id, $0) }
-            Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.more, size: 14) }
+            Btn(.danger, sm: true, iconOnly: true, action: onRemove) { Sym(Icons.trash, size: 12) }
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .overlay(alignment: .bottom) { if !last { t.lineSoft.frame(height: 0.5) } }
@@ -266,9 +295,10 @@ private struct SourceRow: View {
 
 private struct AddSourceForm: View {
     @EnvironmentObject private var theme: ThemeManager
-    @State private var repo = "anthropic-tools/awesome-skills"
+    @EnvironmentObject private var store: AppStore
+    @State private var repo = ""
     @State private var branch = "main"
-    @State private var displayName = "Awesome Skills (community)"
+    @State private var displayName = ""
     @State private var autoSync = true
     var body: some View {
         let t = theme.tokens
@@ -295,8 +325,11 @@ private struct AddSourceForm: View {
                     ATToggle(isOn: autoSync) { autoSync = $0 }
                     Text("Auto-sync every 24h").font(.system(size: 11.5)).foregroundStyle(t.fg2)
                     Spacer()
-                    Btn("Cancel", .ghost, sm: true)
-                    Btn(.primary, sm: true) {} label: { Sym(Icons.plus, size: 12); Text("Add source") }
+                    Btn("Cancel", .ghost, sm: true) { repo = ""; displayName = "" }
+                    Btn(.primary, sm: true, action: {
+                        store.addSource(name: displayName, input: repo)
+                        if store.sourceActionError == nil { repo = ""; displayName = "" }
+                    }) { Sym(Icons.plus, size: 12); Text("Add source") }
                 }
                 .padding(.top, 4)
             }

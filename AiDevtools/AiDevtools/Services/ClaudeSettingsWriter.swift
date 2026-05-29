@@ -66,6 +66,29 @@ public struct ClaudeSettingsWriter {
         try writeRoot(root, to: settingsURL)
     }
 
+    /// Append a marketplace to `extraKnownMarketplaces`. `locationKey` is "url" (git) or
+    /// "repo" (github); `sourceKind` is "git" / "github". Backs up before writing.
+    public func addMarketplace(at settingsURL: URL, id: String, sourceKind: String, locationKey: String, location: String) throws {
+        var root = (try? loadRoot(settingsURL)) ?? [:]
+        var known = (root["extraKnownMarketplaces"] as? [String: Any]) ?? [:]
+        known[id] = ["source": ["source": sourceKind, locationKey: location]]
+        root["extraKnownMarketplaces"] = known
+        try backup(settingsURL)
+        try writeRoot(root, to: settingsURL)
+    }
+
+    /// Remove a marketplace key from `extraKnownMarketplaces`. Backs up before writing.
+    @discardableResult
+    public func removeMarketplace(at settingsURL: URL, id: String) throws -> Bool {
+        var root = try loadRoot(settingsURL)
+        guard var known = root["extraKnownMarketplaces"] as? [String: Any], known[id] != nil else { return false }
+        known.removeValue(forKey: id)
+        root["extraKnownMarketplaces"] = known
+        try backup(settingsURL)
+        try writeRoot(root, to: settingsURL)
+        return true
+    }
+
     /// Build a settings.json command entry from stored fields.
     public static func entry(type: String, command: String, timeoutSeconds: Double, async: Bool, statusMessage: String?) -> [String: Any] {
         var e: [String: Any] = ["type": type]
