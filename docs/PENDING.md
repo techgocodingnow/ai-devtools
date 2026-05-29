@@ -22,10 +22,18 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
   `~/.claude/history.jsonl`, `~/.claude/projects/*/` session transcripts,
   `bash-commands.log`, `telemetry/`. Needs a log-indexing pass; deferred.
 
-### 2. Hooks metrics — ⬜
-- `lastFired` / `firesPerHour` = "—"/0; "Recent invocations" + scan "14 of 24 paths" fake.
-- **Plan:** derive fire counts/last-fired from a hook execution log if one exists, or
-  drop the columns until we add our own hook-invocation telemetry.
+### 2. Hooks metrics — ✅ (read-only telemetry)
+- Found a real, non-invasive source: Claude already writes `tengu_run_hook` events to
+  `~/.claude/telemetry/*.json` (`additional_metadata` is base64 JSON with `hookName`
+  = `event:matcher`, `numCommands`). `HookTelemetryService` reads + decodes them.
+- `lastFired` = real last matching fire; `firesPerHour` repurposed as **observed-fire
+  count** ("N× seen" / "Observed fires"); detail "Recent invocations" lists real fires
+  with an empty state. Agents scan card shows the real candidate count.
+- **Did NOT** wrap/rewrite the user's live hooks (the originally-considered shim) — the
+  read-only telemetry is safer and sufficient.
+- Caveats (acceptable): telemetry is a sparse sample (mostly failed-upload events) and
+  attributes fires at the `event+matcher` level, not the exact command. Noted in-UI.
+- **Future:** for dense, per-command metrics we'd need our own opt-in invocation logger.
 
 ## B. Write-back actions (mutate disk/system — sign-off each)
 

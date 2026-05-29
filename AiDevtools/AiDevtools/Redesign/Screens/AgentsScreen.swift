@@ -35,7 +35,7 @@ struct AgentsScreen: View {
                     Sym(Icons.scan, size: 12).foregroundStyle(t.accent)
                     Text("Scanning system for installed agents…").font(.system(size: 12, weight: .medium)).foregroundStyle(t.fg)
                     Spacer()
-                    Text("14 of 24 paths").mono(11).foregroundStyle(t.fg3)
+                    Text("checking \(store.agentCandidateCount) candidates").mono(11).foregroundStyle(t.fg3)
                 }
                 ScanBar()
             }

@@ -214,7 +214,8 @@ private struct HookRow: View {
                 // last fired
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(hook.lastFired).font(.system(size: 10.5)).foregroundStyle(t.fg3)
-                    Text("\(hook.firesPerHour)/h").font(.system(size: 9.5, design: .monospaced)).foregroundStyle(t.fg4)
+                    Text(hook.firesPerHour > 0 ? "\(hook.firesPerHour)× seen" : "—")
+                        .font(.system(size: 9.5, design: .monospaced)).foregroundStyle(t.fg4)
                 }
                 .frame(width: 76, alignment: .trailing)
                 Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.more, size: 12) }.frame(width: 28)
@@ -282,22 +283,28 @@ private struct HookDetailPanel: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Subtitle("Recent invocations")
-                    Card(padding: 0) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(invocations.enumerated()), id: \.offset) { idx, inv in
-                                HStack(spacing: 8) {
-                                    Dot(color: inv.2 == 0 ? t.ok : t.err)
-                                    Text(inv.3).mono(11).foregroundStyle(t.fg2).frame(minWidth: 50, alignment: .leading)
-                                    Spacer()
-                                    Text(inv.1).font(.system(size: 11)).foregroundStyle(t.fg3)
-                                    Text("·").foregroundStyle(t.fg3)
-                                    Text(inv.0).font(.system(size: 11)).foregroundStyle(t.fg3)
+                    let invocations = store.hookInvocations(hook.id)
+                    if invocations.isEmpty {
+                        Text("No invocations recorded in local telemetry.")
+                            .font(.system(size: 11.5)).foregroundStyle(t.fg3)
+                    } else {
+                        Card(padding: 0) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(invocations.enumerated()), id: \.offset) { idx, inv in
+                                    HStack(spacing: 8) {
+                                        Dot(color: t.ok)
+                                        Text(inv.label).mono(11).foregroundStyle(t.fg2).frame(minWidth: 50, alignment: .leading)
+                                        Spacer()
+                                        Text(inv.when).font(.system(size: 11)).foregroundStyle(t.fg3)
+                                    }
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .overlay(alignment: .bottom) { if idx < invocations.count - 1 { t.lineSoft.frame(height: 0.5) } }
                                 }
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .overlay(alignment: .bottom) { if idx < invocations.count - 1 { t.lineSoft.frame(height: 0.5) } }
                             }
                         }
                     }
+                    Text("From ~/.claude/telemetry — sampled, event-level attribution.")
+                        .font(.system(size: 10)).foregroundStyle(t.fg4)
                 }
                 HStack(spacing: 6) {
                     Btn(.ghost, sm: true) {} label: { Sym(Icons.edit, size: 12); Text("Edit") }
@@ -335,11 +342,8 @@ private struct HookDetailPanel: View {
         [("Event", hook.event), ("Matcher", hook.matcher),
          ("Type", hook.type.rawValue + (hook.async ? " (async)" : "")),
          ("Timeout", String(format: "%.1f s", Double(hook.timeout) / 1000)),
-         ("Source", hook.source), ("Last fired", hook.lastFired), ("Rate", "\(hook.firesPerHour) / hour")]
-    }
-    private var invocations: [(String, String, Int, String)] {
-        [("14s ago", "42ms", 0, "Edit"), ("38s ago", "38ms", 0, "Edit"),
-         ("1m ago", "51ms", 0, "Write"), ("3m ago", "120ms", hook.status == .err ? 2 : 0, "Edit")]
+         ("Source", hook.source), ("Last fired", hook.lastFired),
+         ("Observed fires", "\(hook.firesPerHour)")]
     }
 }
 

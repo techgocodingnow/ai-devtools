@@ -109,6 +109,12 @@ final class AppStore: ObservableObject {
     private let discovery = ProjectDiscoveryService()
     private let detector = AgentDetectionService()
     private let catalog = MarketplaceCatalogService()
+    private let hookTelemetry = HookTelemetryService()
+
+    /// Real hook fires read from `~/.claude/telemetry` (sparse, read-only).
+    private var hookFires: [HookTelemetryService.Fire] = []
+    /// Number of agent candidates the detector probes (for the scan card).
+    @Published var agentCandidateCount: Int = 0
 
     /// UI item id → registry ref, so mutations resolve back to the right entity.
     private var itemRefs: [String: CapabilityRef] = [:]
@@ -136,8 +142,10 @@ final class AppStore: ObservableObject {
         }
 
         let detected = await detector.detect()
+        agentCandidateCount = detector.candidateCount
         let discoveredProjects = await discovery.discoverProjects()
         for project in discoveredProjects { projectsStore.promoteDiscovered(project) }
+        hookFires = await hookTelemetry.loadFires()
 
         rebuildAll(detected: detected)
         loaded = true
@@ -287,9 +295,11 @@ final class AppStore: ObservableObject {
         scanning = true
         Task { @MainActor in
             let detected = await detector.detect()
+            agentCandidateCount = detector.candidateCount
             let discoveredProjects = await discovery.discoverProjects()
             for project in discoveredProjects { projectsStore.promoteDiscovered(project) }
             importer.runImport()
+            hookFires = await hookTelemetry.loadFires()
             rebuildAll(detected: detected)
             persist()
             scanning = false
@@ -490,6 +500,7 @@ final class AppStore: ObservableObject {
                 seen.insert(id)
 
                 let eventAgents = hookEvents.first { $0.id == eventID }?.agents ?? ["claude-code"]
+                let stat = fireStat(eventID: eventID, matcher: h.matcher)
                 result.append(Hook(
                     id: id,
                     event: eventID,
@@ -502,8 +513,8 @@ final class AppStore: ObservableObject {
                     scopes: [wsID: true],
                     enabled: [wsID: true],
                     status: .ok,
-                    lastFired: "—",
-                    firesPerHour: 0,
+                    lastFired: stat.last.map(Self.relativeDate) ?? "—",
+                    firesPerHour: stat.count,   // repurposed: total observed fires (see docs/PENDING.md #2)
                     source: h.source,
                     trusted: true,
                     description: h.statusMessage ?? "Runs on \(hookEvents.first { $0.id == eventID }?.label ?? h.event).",
@@ -522,6 +533,33 @@ final class AppStore: ObservableObject {
             }
         }
         hooks = result
+    }
+
+    // MARK: - Hook telemetry matching (real, read-only)
+
+    /// Fires attributed to an event(+matcher) group. Matching is fuzzy by design —
+    /// telemetry only records `event:matcher`, not the exact command.
+    private func firesMatching(eventID: String, matcher: String) -> [HookTelemetryService.Fire] {
+        hookFires.filter { fire in
+            guard Self.mapEvent(fire.event) == eventID else { return false }
+            guard let fm = fire.matcher, fm != "other", !fm.isEmpty else { return true }
+            if matcher == "*" || matcher.isEmpty { return true }
+            return matcher == fm || matcher.split(separator: "|").map(String.init).contains(fm)
+        }
+    }
+
+    private func fireStat(eventID: String, matcher: String) -> (count: Int, last: Date?) {
+        let matched = firesMatching(eventID: eventID, matcher: matcher)
+        return (matched.count, matched.map(\.date).max())
+    }
+
+    /// Real recent invocations for the hook detail panel (most recent first, capped).
+    func hookInvocations(_ id: String) -> [(when: String, label: String)] {
+        guard let hook = hooks.first(where: { $0.id == id }) else { return [] }
+        let label = hookEvents.first { $0.id == hook.event }?.label ?? hook.event
+        return firesMatching(eventID: hook.event, matcher: hook.matcher)
+            .prefix(8)
+            .map { (Self.relativeDate($0.date), label) }
     }
 
     // MARK: - On-demand item detail (real, read from disk)
@@ -720,6 +758,10 @@ final class AppStore: ObservableObject {
     static func relativeModified(_ url: URL) -> String {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let date = attrs[.modificationDate] as? Date else { return "—" }
+        return relativeDate(date)
+    }
+
+    static func relativeDate(_ date: Date) -> String {
         let fmt = RelativeDateTimeFormatter()
         fmt.unitsStyle = .full
         return fmt.localizedString(for: date, relativeTo: Date())

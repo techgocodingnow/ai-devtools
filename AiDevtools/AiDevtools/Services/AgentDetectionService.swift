@@ -55,6 +55,9 @@ public nonisolated struct AgentDetectionService: Sendable {
         ]
     }
 
+    /// Number of agent candidates probed — surfaced by the scan UI.
+    public var candidateCount: Int { candidates.count }
+
     /// Runs detection off the main actor.
     public func detect() async -> [DetectedAgent] {
         await Task.detached(priority: .utility) { [self] in
