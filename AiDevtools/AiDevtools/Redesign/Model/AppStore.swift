@@ -332,6 +332,31 @@ final class AppStore: ObservableObject {
     func setHookScope(_ id: String, ws: String, _ value: Bool) {}
     func addHookScope(_ id: String, ws: String) {}
 
+    /// Events that can actually be written to `~/.claude/settings.json` (real Claude events).
+    var writableHookEvents: [HookEvent] { hookEvents.filter { Self.rawEventName($0.id) != nil } }
+
+    /// Append a new hook to the global settings.json (backup-first). Global scope only.
+    func addNewHook(eventID: String, matcher: String, type: HookType, command: String, timeoutMS: Int, async: Bool) {
+        let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cmd.isEmpty else { hookActionError = "Command is empty."; return }
+        guard let raw = Self.rawEventName(eventID) else {
+            let label = hookEvents.first { $0.id == eventID }?.label ?? eventID
+            hookActionError = "“\(label)” isn’t a Claude settings.json event."
+            return
+        }
+        let entry = ClaudeSettingsWriter.entry(
+            type: type.rawValue, command: cmd,
+            timeoutSeconds: Double(timeoutMS) / 1000, async: async, statusMessage: nil
+        )
+        do {
+            try settingsWriter.addHookEntry(
+                at: settings.settingsURL, event: raw,
+                matcher: matcher.isEmpty ? "*" : matcher, entry: entry
+            )
+            rebuildHooks()
+        } catch { hookActionError = "Couldn't add hook: \(error.localizedDescription)" }
+    }
+
     var selectedHook: Hook? { selectedHookId.flatMap { id in hooks.first { $0.id == id } } }
 
     private var disabledHooksURL: URL { persistence.paths.directory.appendingPathComponent("disabled_hooks.json") }
@@ -810,6 +835,23 @@ final class AppStore: ObservableObject {
         case "PreCompact": return "pre_compact"
         case "SessionEnd": return "session_end"
         default: return raw.lowercased()
+        }
+    }
+
+    /// Inverse of `mapEvent`, restricted to events Claude actually reads from settings.json.
+    /// Returns nil for cursor-only / non-writable events (so we never write a no-op hook).
+    static func rawEventName(_ id: String) -> String? {
+        switch id {
+        case "session_start": return "SessionStart"
+        case "user_prompt": return "UserPromptSubmit"
+        case "pre_tool": return "PreToolUse"
+        case "post_tool": return "PostToolUse"
+        case "notification": return "Notification"
+        case "stop": return "Stop"
+        case "subagent_stop": return "SubagentStop"
+        case "pre_compact": return "PreCompact"
+        case "session_end": return "SessionEnd"
+        default: return nil
         }
     }
 

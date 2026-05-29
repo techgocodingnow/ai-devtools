@@ -454,7 +454,7 @@ private struct HookForm: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Subtitle("Event", size: 10)
                         Picker("", selection: $eventId) {
-                            ForEach(store.hookEvents) { Text("\($0.label) — \($0.desc)").tag($0.id) }
+                            ForEach(store.writableHookEvents) { Text("\($0.label) — \($0.desc)").tag($0.id) }
                         }.labelsHidden().pickerStyle(.menu)
                         if let ev = event {
                             (Text("Supported by: \(ev.agents.compactMap { store.agent($0)?.name }.joined(separator: ", ")) · cadence: ")
@@ -513,7 +513,10 @@ private struct HookForm: View {
             HStack(spacing: 8) {
                 Spacer()
                 Btn("Cancel", .ghost, sm: true) { store.showHookForm = false }
-                Btn(.primary, sm: true, action: { store.showHookForm = false }) { Sym(Icons.check, size: 12); Text("Add hook") }
+                Btn(.primary, sm: true, action: {
+                    store.addNewHook(eventID: eventId, matcher: matcher, type: type, command: command, timeoutMS: timeoutMs, async: isAsync)
+                    if store.hookActionError == nil { store.showHookForm = false }
+                }) { Sym(Icons.check, size: 12); Text("Add hook") }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .overlay(alignment: .top) { t.lineSoft.frame(height: 0.5) }

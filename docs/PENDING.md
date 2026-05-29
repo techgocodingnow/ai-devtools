@@ -49,7 +49,13 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
    - **Project-scoped hooks** still ⬜ — they live outside `~/.claude` (sandbox blocks).
      `setHookScope`/`addHookScope` are intentional no-ops for now; needs an NSOpenPanel
      folder grant per project. Global hooks only this round.
-4. **Hook trust/block + New-hook persist** ⬜ — also write settings.json; discuss next.
+4. **New-hook form** ✅ (global) — submit appends to `~/.claude/settings.json` via the
+   backup-first `ClaudeSettingsWriter`. Event picker restricted to real Claude events
+   (`rawEventName` inverse map); non-writable/cursor-only events are filtered out.
+   Verified: a new PostToolUse hook was written correctly. Project scope still deferred.
+   **Trust/block + untrusted banner**: kept in place but **inert** — settings.json has no
+   "untrusted hook" concept, so these never trigger with real data. Left for a future
+   trust model rather than removed. The untrusted status filter is likewise dormant.
 5. **Sources add/edit/remove** ⬜ — writes `extraKnownMarketplaces` in settings.json.
 6. **Install** (marketplace + Library) ⬜ — installs a plugin to disk.
 7. **Remove** item ⬜ — deletes from disk (destructive).
