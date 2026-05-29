@@ -37,8 +37,19 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
 
 ## B. Write-back actions (mutate disk/system — sign-off each)
 
-3. **Hook toggles** ⬜ — currently in-memory. Real = rewrite `settings.json` (destructive).
-4. **Hook trust/block + New-hook persist** ⬜.
+3. **Hook enable/disable** ✅ (global) — real, reversible. Disable backs up settings.json
+   to `~/.claude/backups/settings-<epoch>.json`, removes the entry, and stashes the full
+   entry in a sidecar (`disabled_hooks.json` in the app container). Enable re-inserts it.
+   `ClaudeSettingsWriter` does atomic, backup-first writes preserving all other keys.
+   Verified: disable→enable round-trip leaves settings.json semantically identical.
+   - **Sandbox:** required broadening the entitlement — `~/.claude/` moved from read-only
+     to read-write (`AiDevtools.entitlements`). `~/.claude.json` stays read-only.
+   - **Note:** writes reserialize the whole file (pretty + sorted keys), so formatting
+     changes on first write (content preserved; backup taken).
+   - **Project-scoped hooks** still ⬜ — they live outside `~/.claude` (sandbox blocks).
+     `setHookScope`/`addHookScope` are intentional no-ops for now; needs an NSOpenPanel
+     folder grant per project. Global hooks only this round.
+4. **Hook trust/block + New-hook persist** ⬜ — also write settings.json; discuss next.
 5. **Sources add/edit/remove** ⬜ — writes `extraKnownMarketplaces` in settings.json.
 6. **Install** (marketplace + Library) ⬜ — installs a plugin to disk.
 7. **Remove** item ⬜ — deletes from disk (destructive).

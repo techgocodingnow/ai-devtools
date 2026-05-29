@@ -44,6 +44,21 @@ struct ItemDetailData {
     struct Capability: Identifiable, Hashable { var id: String { label }; let label: String; let detail: String }
 }
 
+/// Everything needed to locate a hook command in a settings.json and to re-add it.
+/// Used both for active hooks (in-memory) and disabled ones (persisted sidecar).
+struct HookRecord: Codable, Hashable {
+    var id: String
+    var wsID: String
+    var settingsPath: String
+    var rawEvent: String
+    var matcher: String
+    var type: String
+    var command: String
+    var timeoutSeconds: Double
+    var async: Bool
+    var statusMessage: String?
+}
+
 /// Single source of truth for the redesigned UI.
 ///
 /// Backed by the real on-disk registry (`~/.claude`), Claude Desktop config, project
@@ -97,6 +112,7 @@ final class AppStore: ObservableObject {
     // misc
     @Published var scanning = false
     @Published var loaded = false
+    @Published var hookActionError: String?
 
     // MARK: - Real backing stores / services
 
@@ -110,9 +126,14 @@ final class AppStore: ObservableObject {
     private let detector = AgentDetectionService()
     private let catalog = MarketplaceCatalogService()
     private let hookTelemetry = HookTelemetryService()
+    private let settingsWriter = ClaudeSettingsWriter()
 
     /// Real hook fires read from `~/.claude/telemetry` (sparse, read-only).
     private var hookFires: [HookTelemetryService.Fire] = []
+    /// Locator for each active hook (id → on-disk record), rebuilt with the hook list.
+    private var hookRecords: [String: HookRecord] = [:]
+    /// Hooks the user disabled — removed from settings.json, stashed here so they can be re-enabled.
+    private var disabledHooks: [String: HookRecord] = [:]
     /// Number of agent candidates the detector probes (for the scan card).
     @Published var agentCandidateCount: Int = 0
 
@@ -132,6 +153,7 @@ final class AppStore: ObservableObject {
     func load() async {
         try? persistence.loadRegistry(into: registry)
         try? persistence.loadProjects(into: projectsStore)
+        loadDisabledHooks()
 
         importer.runImport()
         for server in desktopConfig.loadServers() {
@@ -268,25 +290,60 @@ final class AppStore: ObservableObject {
         marketplaces[i].enabled = value
     }
 
-    // MARK: - Hooks (read-only backed; toggles are in-memory — we never rewrite the user's settings.json)
+    // MARK: - Hooks (real enable/disable: backup settings.json, stash entry in sidecar)
 
     func toggleEvent(_ id: String) {
         if collapsedEvents.contains(id) { collapsedEvents.remove(id) } else { collapsedEvents.insert(id) }
     }
+
+    /// Enable = re-insert the stashed entry into settings.json. Disable = remove + stash.
+    /// Every write is backed up under ~/.claude/backups/ first.
     func toggleHook(_ id: String, _ value: Bool) {
-        guard let i = hooks.firstIndex(where: { $0.id == id }) else { return }
-        hooks[i].enabled[workspace] = value
+        if value {
+            guard let rec = disabledHooks[id] else { return }
+            let url = URL(fileURLWithPath: rec.settingsPath)
+            let entry = ClaudeSettingsWriter.entry(
+                type: rec.type, command: rec.command, timeoutSeconds: rec.timeoutSeconds,
+                async: rec.async, statusMessage: rec.statusMessage
+            )
+            do {
+                try settingsWriter.addHookEntry(at: url, event: rec.rawEvent, matcher: rec.matcher, entry: entry)
+                disabledHooks.removeValue(forKey: id)
+                saveDisabledHooks()
+                rebuildHooks()
+            } catch { hookActionError = "Couldn't enable hook: \(error.localizedDescription)" }
+        } else {
+            guard let rec = hookRecords[id] else { return }
+            let url = URL(fileURLWithPath: rec.settingsPath)
+            do {
+                let removed = try settingsWriter.removeHookEntry(
+                    at: url, event: rec.rawEvent, matcher: rec.matcher, command: rec.command
+                )
+                guard removed else { hookActionError = "Hook not found in settings.json"; return }
+                disabledHooks[id] = rec
+                saveDisabledHooks()
+                rebuildHooks()
+            } catch { hookActionError = "Couldn't disable hook: \(error.localizedDescription)" }
+        }
     }
-    func setHookScope(_ id: String, ws: String, _ value: Bool) {
-        guard let i = hooks.firstIndex(where: { $0.id == id }) else { return }
-        hooks[i].enabled[ws] = value
-    }
-    func addHookScope(_ id: String, ws: String) {
-        guard let i = hooks.firstIndex(where: { $0.id == id }) else { return }
-        hooks[i].scopes[ws] = true
-        hooks[i].enabled[ws] = true
-    }
+
+    /// Per-workspace hook scoping isn't wired yet (a hook lives in one settings file).
+    /// Left as no-ops so the scope UI stays inert rather than lying. See docs/PENDING.md #4.
+    func setHookScope(_ id: String, ws: String, _ value: Bool) {}
+    func addHookScope(_ id: String, ws: String) {}
+
     var selectedHook: Hook? { selectedHookId.flatMap { id in hooks.first { $0.id == id } } }
+
+    private var disabledHooksURL: URL { persistence.paths.directory.appendingPathComponent("disabled_hooks.json") }
+    private func loadDisabledHooks() {
+        guard let data = try? Data(contentsOf: disabledHooksURL),
+              let arr = try? JSONDecoder().decode([HookRecord].self, from: data) else { return }
+        disabledHooks = Dictionary(uniqueKeysWithValues: arr.map { ($0.id, $0) })
+    }
+    private func saveDisabledHooks() {
+        let arr = Array(disabledHooks.values)
+        if let data = try? JSONEncoder().encode(arr) { try? data.write(to: disabledHooksURL, options: [.atomic]) }
+    }
 
     // MARK: - Rescan (real)
 
@@ -488,50 +545,75 @@ final class AppStore: ObservableObject {
     private func rebuildHooks() {
         var result: [Hook] = []
         var seen: Set<String> = []
+        hookRecords = [:]
 
-        func add(_ parsed: [ClaudeSettingsService.ParsedHook], wsID: String) {
-            for (idx, h) in parsed.enumerated() {
+        func makeHook(eventID: String, matcher: String, command: String, type: HookType,
+                      timeoutMS: Int, async: Bool, source: String, enabled: Bool,
+                      wsID: String, statusMessage: String?, id: String) -> Hook {
+            let eventAgents = hookEvents.first { $0.id == eventID }?.agents ?? ["claude-code"]
+            let stat = fireStat(eventID: eventID, matcher: matcher)
+            return Hook(
+                id: id, event: eventID, type: type, matcher: matcher, command: command,
+                timeout: timeoutMS, async: async, agents: eventAgents,
+                scopes: [wsID: true], enabled: [wsID: enabled], status: .ok,
+                lastFired: stat.last.map(Self.relativeDate) ?? "—",
+                firesPerHour: stat.count,   // repurposed: observed fires (docs/PENDING.md #2)
+                source: source, trusted: true,
+                description: statusMessage ?? "Runs on \(hookEvents.first { $0.id == eventID }?.label ?? eventID).",
+                warning: nil
+            )
+        }
+
+        func uniqueID(_ base: String) -> String {
+            var b = base
+            if b.hasSuffix("-") { b = String(b.dropLast()) }
+            var id = b; var n = 2
+            while seen.contains(id) { id = "\(b)-\(n)"; n += 1 }
+            seen.insert(id)
+            return id
+        }
+
+        func add(_ parsed: [ClaudeSettingsService.ParsedHook], wsID: String, fileURL: URL) {
+            for h in parsed {
                 let eventID = Self.mapEvent(h.event)
-                var base = "\(eventID)-\(Self.slug(h.command).prefix(20))"
-                if base.hasSuffix("-") { base = String(base.dropLast()) }
-                var id = base
-                var n = 2
-                while seen.contains(id) { id = "\(base)-\(n)"; n += 1 }
-                seen.insert(id)
-
-                let eventAgents = hookEvents.first { $0.id == eventID }?.agents ?? ["claude-code"]
-                let stat = fireStat(eventID: eventID, matcher: h.matcher)
-                result.append(Hook(
-                    id: id,
-                    event: eventID,
-                    type: HookType(rawValue: h.type) ?? .command,
-                    matcher: h.matcher,
-                    command: h.command,
-                    timeout: Int(h.timeoutSeconds * 1000),
-                    async: h.async,
-                    agents: eventAgents,
-                    scopes: [wsID: true],
-                    enabled: [wsID: true],
-                    status: .ok,
-                    lastFired: stat.last.map(Self.relativeDate) ?? "—",
-                    firesPerHour: stat.count,   // repurposed: total observed fires (see docs/PENDING.md #2)
-                    source: h.source,
-                    trusted: true,
-                    description: h.statusMessage ?? "Runs on \(hookEvents.first { $0.id == eventID }?.label ?? h.event).",
-                    warning: nil
+                let id = uniqueID("\(eventID)-\(Self.slug(h.command).prefix(20))")
+                hookRecords[id] = HookRecord(
+                    id: id, wsID: wsID, settingsPath: fileURL.path, rawEvent: h.event,
+                    matcher: h.matcher, type: h.type, command: h.command,
+                    timeoutSeconds: h.timeoutSeconds, async: h.async, statusMessage: h.statusMessage
+                )
+                result.append(makeHook(
+                    eventID: eventID, matcher: h.matcher, command: h.command,
+                    type: HookType(rawValue: h.type) ?? .command, timeoutMS: Int(h.timeoutSeconds * 1000),
+                    async: h.async, source: h.source, enabled: true, wsID: wsID,
+                    statusMessage: h.statusMessage, id: id
                 ))
             }
         }
 
-        add(settings.loadHooks(), wsID: "global")
+        add(settings.loadHooks(), wsID: "global", fileURL: settings.settingsURL)
         for project in projectsStore.orderedProjects {
             let projectSettings = project.rootPath
                 .appendingPathComponent(".claude")
                 .appendingPathComponent("settings.json")
             if FileManager.default.fileExists(atPath: projectSettings.path) {
-                add(settings.loadHooks(from: projectSettings, source: "project"), wsID: project.id.uuidString)
+                add(settings.loadHooks(from: projectSettings, source: "project"),
+                    wsID: project.id.uuidString, fileURL: projectSettings)
             }
         }
+
+        // Merge disabled hooks (removed from settings.json, kept in the sidecar) as off rows.
+        for rec in disabledHooks.values {
+            seen.insert(rec.id)
+            let eventID = Self.mapEvent(rec.rawEvent)
+            result.append(makeHook(
+                eventID: eventID, matcher: rec.matcher, command: rec.command,
+                type: HookType(rawValue: rec.type) ?? .command, timeoutMS: Int(rec.timeoutSeconds * 1000),
+                async: rec.async, source: "user", enabled: false, wsID: rec.wsID,
+                statusMessage: rec.statusMessage, id: rec.id
+            ))
+        }
+
         hooks = result
     }
 

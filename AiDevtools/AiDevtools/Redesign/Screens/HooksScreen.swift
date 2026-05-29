@@ -35,6 +35,7 @@ struct HooksScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+            if let err = store.hookActionError { errorBanner(err) }
             if untrusted > 0 { untrustedBanner }
             HStack(spacing: 0) {
                 ScrollView {
@@ -103,6 +104,20 @@ struct HooksScreen: View {
                 }
             }
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        let t = theme.tokens
+        return HStack(spacing: 10) {
+            Sym(Icons.alert, size: 14).foregroundStyle(t.err)
+            Text(message).font(.system(size: 11.5)).foregroundStyle(t.fg2)
+            Spacer()
+            Btn("Dismiss", .ghost, sm: true) { store.hookActionError = nil }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.oklch(0.66, 0.20, 25, 0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.oklch(0.66, 0.20, 25, 0.4), lineWidth: 0.5))
+        .padding(.horizontal, 16).padding(.bottom, 8)
     }
 
     private var untrustedBanner: some View {
