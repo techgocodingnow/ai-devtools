@@ -98,6 +98,16 @@ with the maintainer before execution. Status legend: ✅ done · 🟡 partial ·
     Remove action. (External-launch actions verified by build + standard NSWorkspace/
     NSOpenPanel APIs; not click-tested to avoid spawning apps mid-automation.)
 
-## D. Unreviewed
+## D. Reviewed
 
-11. **Onboarding** + **Tweaks** ⬜ — confirm behaviors are real.
+11. **Onboarding + Tweaks** ✅ — Tweaks was already fully real (theme/density/accent/
+    sidebar bound to ThemeManager + persisted; Replay-onboarding + Trigger-rescan wired).
+    Onboarding reads real detected agents; fixed the misleading parts: the per-agent pill
+    now honestly shows detected/not-found, the inert toggle was removed, and the version
+    reads the real bundle version (v1.0.2). Verified in-app.
+
+---
+
+**All A–D items resolved.** Remaining intentional stubs (documented above): per-project
+hook scoping (#3/#4), Sources Edit (#5), real plugin install/version-compare (#6),
+Library row ⋯ menu (#8), and the inert trust/block model (#4) — each deferred with a plan.

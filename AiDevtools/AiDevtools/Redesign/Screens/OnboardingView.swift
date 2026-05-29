@@ -15,7 +15,7 @@ struct OnboardingView: View {
                 .padding(.bottom, 16)
 
             (Text("Welcome to AgentToolKit").font(.system(size: 22, weight: .semibold))
-             + Text("  v1.0").font(.system(size: 16)).foregroundColor(t.fg4))
+             + Text("  \(Self.appVersion)").font(.system(size: 16)).foregroundColor(t.fg4))
                 .foregroundColor(t.fg)
                 .padding(.bottom, 6)
 
@@ -48,6 +48,11 @@ struct OnboardingView: View {
         .overlay(RoundedRectangle(cornerRadius: Radius.xl).strokeBorder(t.line, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.45), radius: 32, y: 12)
     }
+
+    /// Real app version from the bundle.
+    static var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "v\($0)" } ?? ""
+    }
 }
 
 private struct AgentPick: View {
@@ -65,8 +70,11 @@ private struct AgentPick: View {
                 Text(agent.binary).font(.system(size: 11, design: .monospaced)).foregroundStyle(t.fg3)
             }
             Spacer()
-            Pill { Dot(color: t.ok, ring: true); Text("detected") }
-            ATToggle(isOn: true) { _ in }
+            if agent.detected {
+                Pill { Dot(color: t.ok, ring: true); Text("detected") }
+            } else {
+                Pill { Dot(color: t.fg4); Text("not found") }
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 9).fill(hover ? t.bgHover : t.bgPanel))
