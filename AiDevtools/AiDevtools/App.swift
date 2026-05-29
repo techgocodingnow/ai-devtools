@@ -1,33 +1,30 @@
 import SwiftUI
 
 @main
-struct AgentCapabilityManagerApp: App {
-    @StateObject private var env = AppEnvironment()
+struct AiDevtoolsApp: App {
+    @StateObject private var store = AppStore()
+    @StateObject private var theme = ThemeManager()
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environmentObject(env)
-                .environmentObject(env.registry)
-                .environmentObject(env.projects)
-                .environmentObject(env.marketplace)
-                .frame(minWidth: 1100, minHeight: 700)
-                .task {
-                    env.bootstrap()
-                    env.discoverInBackground()
-                }
+            AppShell()
+                .environmentObject(store)
+                .environmentObject(theme)
+                .frame(minWidth: 1080, minHeight: 680)
+                .preferredColorScheme(theme.colorScheme)
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(replacing: .appInfo) {
-                Button("About Agent Capability Manager") {
-                    NSApp.orderFrontStandardAboutPanel(nil)
-                }
-                Button("Check for Updates…") {
-                    env.checkForUpdates(force: true)
-                    env.showUpdateSheet = true
-                }
-                .keyboardShortcut("u", modifiers: [.command])
+            CommandGroup(after: .appInfo) {
+                Button("Show Onboarding") { store.showOnboarding = true }
             }
+        }
+
+        Settings {
+            TweaksView()
+                .environmentObject(theme)
+                .environmentObject(store)
+                .preferredColorScheme(theme.colorScheme)
         }
     }
 }
