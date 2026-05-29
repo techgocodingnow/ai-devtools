@@ -94,6 +94,7 @@ final class AppStore: ObservableObject {
     private let settings = ClaudeSettingsService()
     private let discovery = ProjectDiscoveryService()
     private let detector = AgentDetectionService()
+    private let catalog = MarketplaceCatalogService()
 
     /// UI item id → registry ref, so mutations resolve back to the right entity.
     private var itemRefs: [String: CapabilityRef] = [:]
@@ -127,6 +128,32 @@ final class AppStore: ObservableObject {
         rebuildAll(detected: detected)
         loaded = true
         persist()
+        await loadFeed()
+    }
+
+    /// Fetch the plugin catalog for each GitHub-backed marketplace and project it into the feed.
+    /// Also backfills each source's item count. Network-best-effort; failures leave the feed empty.
+    func loadFeed() async {
+        let sources = marketplaces.compactMap { MarketplaceCatalogService.source(id: $0.id, url: $0.url) }
+        guard !sources.isEmpty else { return }
+        let results = await catalog.fetchAll(sources)
+
+        var feedItems: [FeedItem] = []
+        for result in results {
+            let verified = marketplaces.first { $0.id == result.marketID }?.trust == .verified
+            if let i = marketplaces.firstIndex(where: { $0.id == result.marketID }) {
+                marketplaces[i].items = result.items.count
+                marketplaces[i].lastSync = "just now"
+            }
+            for item in result.items {
+                feedItems.append(FeedItem(
+                    id: item.id, name: item.name, kind: .plugin, vendor: item.vendor,
+                    installs: "—", stars: 0, market: result.marketID,
+                    description: item.description, verified: verified
+                ))
+            }
+        }
+        feed = feedItems.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private var detectedAgents: [AgentDetectionService.DetectedAgent] = []
@@ -252,6 +279,7 @@ final class AppStore: ObservableObject {
             rebuildAll(detected: detected)
             persist()
             scanning = false
+            await loadFeed()
         }
     }
 

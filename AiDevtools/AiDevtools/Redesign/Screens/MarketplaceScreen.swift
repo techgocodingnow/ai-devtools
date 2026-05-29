@@ -29,11 +29,13 @@ struct MarketplaceScreen: View {
                 }
                 Spacer()
                 SearchField(text: $store.search, placeholder: "Search the marketplace…").frame(width: 260)
-                Btn(.ghost, sm: true) {} label: { Sym(Icons.refresh, size: 12); Text("Sync now") }
+                Btn(.ghost, sm: true, action: { Task { await store.loadFeed() } }) {
+                    Sym(Icons.refresh, size: 12); Text("Sync now")
+                }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    hero
+                    if let f = featured { hero(f) }
                     filterRow
                     grid
                 }
@@ -42,19 +44,29 @@ struct MarketplaceScreen: View {
         }
     }
 
-    private var hero: some View {
+    /// Pick a real headline item: prefer a verified one, else the first in the feed.
+    private var featured: FeedItem? {
+        store.feed.first { $0.verified } ?? store.feed.first
+    }
+
+    private func hero(_ item: FeedItem) -> some View {
         let t = theme.tokens
+        let sourceName = store.marketplaces.first { $0.id == item.market }?.name ?? item.market
         return HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 0) {
                 Pill("Featured", style: .accent)
-                Text("Stripe MCP · official").font(.system(size: 16, weight: .semibold)).foregroundStyle(t.fg)
-                    .padding(.top, 8).padding(.bottom, 4)
-                Text("Manage products, prices, subscriptions and refunds directly from your agent. Verified by Stripe, ships with type-safe tool definitions.")
-                    .font(.system(size: 12)).foregroundStyle(t.fg2).lineSpacing(2).frame(maxWidth: 460, alignment: .leading)
+                HStack(spacing: 6) {
+                    Text(item.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(t.fg)
+                    if item.verified { Sym(Icons.shieldOk, size: 13).foregroundStyle(t.accent) }
+                }
+                .padding(.top, 8).padding(.bottom, 4)
+                Text(item.description.isEmpty ? "\(item.vendor) · available from \(sourceName)." : item.description)
+                    .font(.system(size: 12)).foregroundStyle(t.fg2).lineSpacing(2)
+                    .frame(maxWidth: 460, alignment: .leading).lineLimit(3)
                 HStack(spacing: 14) {
-                    Label2(Icons.download, "8,142 installs", t.fg3)
-                    HStack(spacing: 4) { Sym(Icons.starFill, size: 11).foregroundStyle(Color.oklch(0.78, 0.13, 78)); Text("4.9") }
-                    HStack(spacing: 4) { Sym(Icons.shieldOk, size: 11).foregroundStyle(t.ok); Text("verified") }
+                    Label2(Icons.shop, sourceName, t.fg3)
+                    Text(item.vendor).mono(11)
+                    if item.verified { HStack(spacing: 4) { Sym(Icons.shieldOk, size: 11).foregroundStyle(t.ok); Text("verified") } }
                 }
                 .font(.system(size: 11.5)).foregroundStyle(t.fg3).padding(.top, 12)
             }
@@ -95,10 +107,28 @@ struct MarketplaceScreen: View {
         }
     }
 
-    private var grid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 8)], alignment: .leading, spacing: 8) {
-            ForEach(filtered) { m in FeedCard(item: m, sourceName: store.marketplaces.first { $0.id == m.market }?.name ?? m.market) }
+    @ViewBuilder private var grid: some View {
+        if store.feed.isEmpty {
+            emptyState
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(filtered) { m in FeedCard(item: m, sourceName: store.marketplaces.first { $0.id == m.market }?.name ?? m.market) }
+            }
         }
+    }
+
+    private var emptyState: some View {
+        let t = theme.tokens
+        return VStack(spacing: 6) {
+            Sym(Icons.shop, size: 30).foregroundStyle(t.fg3.opacity(0.5))
+            Text(store.marketplaces.isEmpty ? "No marketplace sources configured." : "Loading catalogs from your sources…")
+                .font(.system(size: 13)).foregroundStyle(t.fg3).padding(.top, 10)
+            Text(store.marketplaces.isEmpty
+                 ? "Add a source under Sources to browse installable plugins."
+                 : "Hit Sync now if nothing appears.")
+                .font(.system(size: 11.5)).foregroundStyle(t.fg3)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 60)
     }
 }
 

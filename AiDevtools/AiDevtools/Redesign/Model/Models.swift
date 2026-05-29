@@ -127,8 +127,8 @@ struct MarketplaceSource: Identifiable, Hashable {
     let name: String
     let url: String
     let kind: MarketSourceKind
-    let items: Int
-    let lastSync: String
+    var items: Int
+    var lastSync: String
     var enabled: Bool
     let trust: MarketTrust
 }
