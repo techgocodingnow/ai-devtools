@@ -33,6 +33,24 @@ public final class RegistryStore: ObservableObject {
     public func upsert(_ server: MCPServer) { mcpServers[server.id] = server }
     public func upsert(_ agent: Agent) { agents[agent.id] = agent }
 
+    // MARK: - Remove
+
+    public func removeSkill(_ id: UUID) {
+        if let s = skills.removeValue(forKey: id) { globalEnabled.removeValue(forKey: s.ref) }
+    }
+    public func removeMCPServer(_ id: UUID) {
+        if let m = mcpServers.removeValue(forKey: id) { globalEnabled.removeValue(forKey: m.ref) }
+    }
+
+    /// Remove a plugin and every capability it owns (child skills + MCP servers), along with
+    /// their global-enable entries. Mirrors how the importer adds the plugin as a unit.
+    public func removePlugin(_ id: UUID) {
+        guard let plugin = plugins.removeValue(forKey: id) else { return }
+        globalEnabled.removeValue(forKey: plugin.ref)
+        for sid in plugin.skillIDs { removeSkill(sid) }
+        for mid in plugin.mcpServerIDs { removeMCPServer(mid) }
+    }
+
     // MARK: - Lookup
 
     public func skill(for ref: CapabilityRef) -> Skill? {

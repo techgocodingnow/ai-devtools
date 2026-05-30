@@ -45,6 +45,19 @@ struct AppShell: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .confirmationDialog(
+            "Uninstall “\(store.pendingUninstall?.name ?? "")”?",
+            isPresented: Binding(
+                get: { store.pendingUninstall != nil },
+                set: { if !$0 { store.pendingUninstall = nil } }
+            ),
+            presenting: store.pendingUninstall
+        ) { item in
+            Button("Uninstall", role: .destructive) { store.confirmUninstall() }
+            Button("Cancel", role: .cancel) { store.pendingUninstall = nil }
+        } message: { item in
+            Text("Deletes the “\(item.name)” plugin files from ~/.claude and removes it from Claude Code. This can’t be undone. A timestamped backup of settings.json and installed_plugins.json is saved to ~/.claude/backups first.")
+        }
         .animation(.easeInOut(duration: 0.15), value: store.showOnboarding)
         .animation(.easeInOut(duration: 0.2), value: store.toast)
         .environment(\.colorScheme, theme.colorScheme)
@@ -59,6 +72,7 @@ struct AppShell: View {
         case .groups: GroupsScreen()
         case .agents: AgentsScreen()
         case .hooks: HooksScreen()
+        case .performance: PerformanceScreen()
         }
     }
 }

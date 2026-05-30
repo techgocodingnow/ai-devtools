@@ -257,7 +257,15 @@ struct LibraryRow: View {
                 Text(item.updated).font(.system(size: 11.5)).foregroundStyle(t.fg3).lineLimit(1)
                     .frame(width: LibraryColumns.updated, alignment: .leading)
                 statusCell(enabled, t).frame(width: LibraryColumns.status, alignment: .leading)
-                Btn(.ghost, sm: true, iconOnly: true) {} label: { Sym(Icons.more, size: 14) }
+                Menu {
+                    Button("Open") { store.openItem(item.id) }
+                    Button("Reveal in Finder") { store.revealItemInFinder(item.id) }
+                    Divider()
+                    Button("Remove…", role: .destructive) { store.requestRemove(item.id) }
+                } label: { Sym(Icons.more, size: 14) }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
                     .frame(width: LibraryColumns.more)
             }
             .padding(.horizontal, theme.metrics.padX)

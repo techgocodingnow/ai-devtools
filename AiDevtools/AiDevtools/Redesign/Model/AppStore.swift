@@ -3,7 +3,7 @@ import Combine
 import AppKit
 
 enum Screen: Hashable {
-    case library, itemDetail, marketplace, sources, groups, agents, hooks
+    case library, itemDetail, marketplace, sources, groups, agents, hooks, performance
     var label: String {
         switch self {
         case .library, .itemDetail: return "Library"
@@ -12,6 +12,7 @@ enum Screen: Hashable {
         case .groups: return "Groups"
         case .agents: return "Agents"
         case .hooks: return "Hooks"
+        case .performance: return "Performance"
         }
     }
 }
@@ -102,6 +103,8 @@ final class AppStore: ObservableObject {
     @Published var hooks: [Hook] = []
     @Published var hookEvents: [HookEvent] = SeedData.hookEvents   // lifecycle taxonomy (reference data)
     @Published var workspaces: [Workspace] = []
+    /// Skill-quality scorecards derived from real session transcripts (read-only). See Performance screen.
+    @Published var skillMetrics: [SkillMetric] = []
 
     // library filters
     @Published var kindFilter: ItemKind?
@@ -145,6 +148,8 @@ final class AppStore: ObservableObject {
     private let catalog = MarketplaceCatalogService()
     private let hookTelemetry = HookTelemetryService()
     private let settingsWriter = ClaudeSettingsWriter()
+    private let skillTelemetry = SkillTelemetryService()
+    private let pluginUninstaller = PluginUninstaller()
 
     /// Real hook fires read from `~/.claude/telemetry` (sparse, read-only).
     private var hookFires: [HookTelemetryService.Fire] = []
@@ -162,6 +167,8 @@ final class AppStore: ObservableObject {
     private var customAgents: [CustomAgent] = []
     /// Number of agent candidates the detector probes (for the scan card).
     @Published var agentCandidateCount: Int = 0
+    /// Item awaiting an uninstall confirmation (drives the destructive confirm dialog). Nil = no prompt.
+    @Published var pendingUninstall: Item?
 
     /// UI item id → registry ref, so mutations resolve back to the right entity.
     private var itemRefs: [String: CapabilityRef] = [:]
@@ -202,7 +209,14 @@ final class AppStore: ObservableObject {
         rebuildAll(detected: detected)
         loaded = true
         persist()
+        // Skill telemetry parses the whole transcript corpus — load it without blocking the UI.
+        Task { await rebuildSkillMetrics() }
         await loadFeed()
+    }
+
+    /// Re-derive per-skill quality scorecards from `~/.claude/projects` transcripts (read-only).
+    func rebuildSkillMetrics() async {
+        skillMetrics = await skillTelemetry.metrics()
     }
 
     /// Fetch the plugin catalog for each GitHub-backed marketplace and project it into the feed.
@@ -267,6 +281,53 @@ final class AppStore: ObservableObject {
         default:
             showToast("No uninstall command for this item.")
         }
+    }
+
+    /// Entry point for the Remove action. Plugin-backed items open a destructive confirm
+    /// dialog (real on-disk uninstall); standalone items fall back to the copy-command path.
+    func requestRemove(_ id: String) {
+        guard let ref = itemRefs[id] else { return }
+        if owningPlugin(for: ref) != nil, let item = items.first(where: { $0.id == id }) {
+            pendingUninstall = item
+        } else {
+            copyRemoveCommand(id)
+        }
+    }
+
+    /// Confirmed destructive uninstall: delete the plugin from disk + JSON, drop it from the
+    /// registry (with its child skills/MCP servers), then rebuild every UI surface so it
+    /// disappears from the Library list, counts, sidebar Groups, and the open detail panel.
+    func confirmUninstall() {
+        guard let item = pendingUninstall else { return }
+        pendingUninstall = nil
+        guard let ref = itemRefs[item.id], let plugin = owningPlugin(for: ref) else {
+            showToast("Couldn't resolve plugin to uninstall."); return
+        }
+        let qualified = pluginQualifiedName(plugin)
+        let qualifiedKey = enabledPlugins.keys.first { $0.hasPrefix(plugin.name + "@") }
+
+        do {
+            try pluginUninstaller.uninstall(rootDirectory: plugin.rootDirectory, qualifiedName: qualifiedKey)
+        } catch PluginUninstaller.UninstallError.pathOutsideHome(let path) {
+            showToast("Refused: plugin path outside ~/.claude (\(Self.abbreviate(path))). Copied command instead.")
+            copyToClipboard("/plugin uninstall \(qualified)")
+            return
+        } catch {
+            showToast("Uninstall failed: \(error.localizedDescription)")
+            return
+        }
+
+        // Mirror the disk change in the in-memory registry + persisted state.
+        let name = plugin.name
+        registry.removePlugin(plugin.id)
+        if let key = qualifiedKey { enabledPlugins.removeValue(forKey: key) }
+
+        // If the removed item is currently open, leave the now-dangling detail screen.
+        if openItemId == item.id { nav(.library) }
+
+        rebuildAll(detected: detectedAgents)
+        persist()
+        showToast("Uninstalled “\(name)” — files removed from ~/.claude")
     }
 
     /// Open the item's real file in the system default editor.
