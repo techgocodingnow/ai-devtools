@@ -53,6 +53,8 @@ struct Sidebar: View {
                                active: store.screen == .agents) { store.nav(.agents) }
                     SidebarRow(icon: Icons.folder, label: "Groups", count: store.groups.count,
                                active: store.screen == .groups) { store.nav(.groups) }
+                    SidebarRow(icon: Icons.gauge, label: "Performance",
+                               active: store.screen == .performance) { store.nav(.performance) }
                 }
                 .padding(.bottom, 8)
             }
